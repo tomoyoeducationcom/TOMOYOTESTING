@@ -389,7 +389,7 @@ export async function submitMultiChildRegistration(params: {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${params.idToken}`,
+        'X-Firebase-Token': params.idToken,
       },
       body: JSON.stringify({
         parentName: params.parentName.trim(),
@@ -690,7 +690,7 @@ export async function adminCreateOfflineStudent(params: {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${idToken}`,
+        'X-Firebase-Token': idToken,
       },
       body: JSON.stringify({
         registrationId: studentRef.id,
@@ -871,7 +871,7 @@ export async function adminConfirmStudentDuePayment(params: {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${idToken}`,
+        'X-Firebase-Token': idToken,
       },
       body: JSON.stringify({
         studentId: student.id,
