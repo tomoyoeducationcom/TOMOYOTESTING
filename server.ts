@@ -3,7 +3,7 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
+
 import {
   ADMIN_WHATSAPP_TARGET,
   buildPaymentDueNotificationMessage,
@@ -455,6 +455,7 @@ async function startServer() {
   const isProd = process.env.NODE_ENV === 'production';
 
   if (!isProd) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'custom',

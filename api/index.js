@@ -4,7 +4,6 @@ import express from "express";
 import fs2 from "fs";
 import path2 from "path";
 import { fileURLToPath } from "url";
-import { createServer as createViteServer } from "vite";
 
 // src/lib/domain.ts
 var ADMIN_UID = "Tlqf2dNHYCRuYmxgEbHFa783iDs1";
@@ -960,6 +959,7 @@ async function startServer() {
   const app2 = createApp();
   const isProd = process.env.NODE_ENV === "production";
   if (!isProd) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "custom"
