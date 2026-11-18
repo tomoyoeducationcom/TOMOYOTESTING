@@ -291,3 +291,22 @@ test('SEO excludes private routes from sitemap and applies noindex', () => {
   assert.ok(injectedPublic.includes('<meta name="robots" content="index, follow" />'));
   assert.ok(injectedPublic.includes('<link rel="canonical" href="https://preview.example.com/cabang" />'));
 });
+
+test('server auth extracts X-Firebase-Token first and falls back to Bearer header', async () => {
+  const { extractFirebaseTokenFromHeaders } = await import('../server/auth');
+  assert.equal(
+    extractFirebaseTokenFromHeaders({
+      'x-firebase-token': '  firebase-jwt-custom  ',
+      authorization: 'Bearer proxy-token',
+    }),
+    'firebase-jwt-custom'
+  );
+  assert.equal(
+    extractFirebaseTokenFromHeaders({
+      authorization: 'Bearer fallback-jwt',
+    }),
+    'fallback-jwt'
+  );
+  assert.equal(extractFirebaseTokenFromHeaders({}), null);
+  assert.equal(extractFirebaseTokenFromHeaders({ 'x-firebase-token': '   ' }), null);
+});
