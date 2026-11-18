@@ -270,7 +270,7 @@ export function AdminDashboardPage() {
       try {
         const token = await user!.getIdToken();
         const res = await fetch('/api/admin/verify', {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: { 'X-Firebase-Token': token },
         });
         const json = (await res.json()) as {
           authorized?: boolean;
