@@ -1,0 +1,6 @@
+{
+  "name": "TOMOYO PRIVAT & BIMBEL EDUCATION",
+  "description": "Website resmi dan sistem pendaftaran siswa TOMOYO PRIVAT & BIMBEL EDUCATION Indramayu — Learn, Grow, Succeed.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

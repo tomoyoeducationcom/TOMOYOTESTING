@@ -1,0 +1,2864 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  BellRing,
+  CalendarClock,
+  Check,
+  CheckCircle2,
+  CreditCard,
+  ExternalLink,
+  FileText,
+  LayoutDashboard,
+  LogOut,
+  MessageSquare,
+  Printer,
+  RefreshCw,
+  Search,
+  Send,
+  Settings,
+  ShieldAlert,
+  Trash2,
+  Upload,
+  User,
+  UserPlus,
+  Users,
+  X,
+} from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { useSiteData } from '../context/SiteDataContext';
+import {
+  ADMIN_EMAIL,
+  ADMIN_UID,
+  ADMIN_WHATSAPP_TARGET,
+  AcademicStatus,
+  BRAND_IDENTITY,
+  BranchId,
+  ChildGender,
+  OfflineRegistrationDraft,
+  PackageId,
+  PaymentRecord,
+  PaymentStatus,
+  RegistrationStatus,
+  StudentRecord,
+  computeNextMonthlyDueDate,
+  formatJakartaDateTime,
+  formatRupiah,
+  getAcademicStatusLabel,
+  getPackagePriceForBranch,
+  getPaymentStatusLabel,
+  getStatusLabel,
+  isPaymentDueNow,
+  validateOfflineRegistrationDraft,
+} from '../lib/domain';
+import { uploadImageToCloudinary } from '../lib/cloudinary';
+import {
+  adminConfirmStudentDuePayment,
+  adminCreateNotificationLog,
+  adminCreateOfflineStudent,
+  adminCreatePayment,
+  adminDeleteDoc,
+  adminDeleteStudentSafely,
+  adminRecordDueNotificationSent,
+  adminUpdatePayment,
+  adminUpdateStudent,
+  fetchAdminBundle,
+} from '../lib/firestoreService';
+import { GoogleSignInButton } from '../components/GoogleSignInButton';
+import { AdminCmsPanel } from '../components/AdminCmsPanel';
+
+type AdminTab =
+  | 'overview'
+  | 'students'
+  | 'offline'
+  | 'cms'
+  | 'payments'
+  | 'reports'
+  | 'whatsapp';
+type ReportCategory =
+  | 'students'
+  | 'invoice'
+  | 'teachers'
+  | 'schedules'
+  | 'packages'
+  | 'branches';
+
+function toLocalDateTimeInputValue(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+    date.getHours()
+  )}:${pad(date.getMinutes())}`;
+}
+
+function createInitialOfflineDraft(): OfflineRegistrationDraft {
+  return {
+    parentName: '',
+    parentPhone: '',
+    childName: '',
+    childPhotoUrl: '',
+    childGender: 'Laki-laki',
+    gradeLevel: '',
+    packageId: 'paket-1',
+    branchId: 'indramayu-kota',
+    billingAmount: '',
+    initialPaymentStatus: 'belum_bayar',
+    paymentMethod: 'Tunai',
+    registeredAtLocal: toLocalDateTimeInputValue(new Date()),
+    notes: '',
+  };
+}
+
+export function AdminDashboardPage() {
+  const { user, loading: authLoading, authError, logout } = useAuth();
+  const { refresh: refreshPublicSite } = useSiteData();
+
+  const [serverAuthState, setServerAuthState] = useState<{
+    checking: boolean;
+    authorized: boolean;
+    fonnteConfigured: boolean;
+    error?: string;
+  }>({ checking: true, authorized: false, fonnteConfigured: false });
+
+  const [activeTab, setActiveTab] = useState<AdminTab>('overview');
+  const [bundle, setBundle] = useState<Awaited<ReturnType<typeof fetchAdminBundle>> | null>(null);
+  const [bundleLoading, setBundleLoading] = useState(false);
+
+  // Student filters & modals
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | RegistrationStatus>('all');
+  const [branchFilter, setBranchFilter] = useState<'all' | BranchId>('all');
+  const [selectedStudent, setSelectedStudent] = useState<StudentRecord | null>(null);
+  const [confirmDeleteStudent, setConfirmDeleteStudent] = useState<StudentRecord | null>(null);
+  const [studentPhotoUploading, setStudentPhotoUploading] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+
+  // Offline registration state
+  const [offlineDraft, setOfflineDraft] = useState<OfflineRegistrationDraft>(
+    createInitialOfflineDraft
+  );
+  const [offlinePhotoUploading, setOfflinePhotoUploading] = useState(false);
+  const [offlineErrors, setOfflineErrors] = useState<string[]>([]);
+  const [offlineBanner, setOfflineBanner] = useState<{
+    type: 'success' | 'warning';
+    text: string;
+  } | null>(null);
+
+  // Due-date confirmation modal & Fonnte sync state
+  const [confirmDueStudent, setConfirmDueStudent] = useState<StudentRecord | null>(null);
+  const [confirmDueAmount, setConfirmDueAmount] = useState('');
+  const [confirmDueMethod, setConfirmDueMethod] = useState('Tunai');
+  const [confirmDueStatus, setConfirmDueStatus] = useState<PaymentStatus>('lunas');
+  const [confirmDuePeriod, setConfirmDuePeriod] = useState('');
+  const [confirmDueNotes, setConfirmDueNotes] = useState('');
+  const [dueActionMsg, setDueActionMsg] = useState<string | null>(null);
+  const [dueSyncing, setDueSyncing] = useState(false);
+
+  // Manual Payment Form & inline status/edit
+  const [payStudentId, setPayStudentId] = useState('');
+  const [payAmount, setPayAmount] = useState('');
+  const [payMethod, setPayMethod] = useState('Tunai');
+  const [payPeriod, setPayPeriod] = useState('');
+  const [payStatus, setPayStatus] = useState<PaymentStatus>('lunas');
+  const [payNotes, setPayNotes] = useState('');
+  const [payMsg, setPayMsg] = useState<string | null>(null);
+  const [editingPayment, setEditingPayment] = useState<PaymentRecord | null>(null);
+
+  // Multi-data PDF export state
+  const [reportCategory, setReportCategory] = useState<ReportCategory>('students');
+  const [reportBranch, setReportBranch] = useState<'all' | BranchId>('all');
+  const [reportStatus, setReportStatus] = useState<'all' | RegistrationStatus>('all');
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>('all');
+
+  // WhatsApp test state
+  const [waTestResult, setWaTestResult] = useState<{
+    status: string;
+    detail: string;
+  } | null>(null);
+  const [waTesting, setWaTesting] = useState(false);
+
+  const syncDueRemindersWithServer = useCallback(
+    async (students: StudentRecord[]) => {
+      if (!user || students.length === 0) return;
+      setDueSyncing(true);
+      try {
+        const token = await user.getIdToken();
+        const res = await fetch('/api/admin/due-reminders/sync', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            students: students.map((s) => ({
+              id: s.id,
+              parentId: s.parentId,
+              childName: s.childName,
+              parentName: s.parentName,
+              parentPhone: s.parentPhone,
+              packageName: s.packageName,
+              branchName: s.branchName,
+              status: s.status,
+              registeredAtIso: s.registeredAtIso,
+              nextDueAtIso: s.nextDueAtIso,
+              dueConfirmedIso: s.dueConfirmedIso,
+              lastDueNotifiedIso: s.lastDueNotifiedIso,
+              billingAmount: s.billingAmount,
+            })),
+          }),
+        });
+        if (res.ok) {
+          const json = (await res.json()) as {
+            triggered?: Array<{
+              studentId: string;
+              parentId: string;
+              childName: string;
+              dueAtIso: string;
+              status: 'sent' | 'failed' | 'unconfigured' | 'skipped_duplicate';
+              detail: string;
+              target: string;
+              messagePreview: string;
+            }>;
+          };
+          if (Array.isArray(json.triggered) && json.triggered.length > 0) {
+            const nowIso = new Date().toISOString();
+            for (const item of json.triggered) {
+              await adminCreateNotificationLog({
+                registrationId: item.studentId,
+                parentId: item.parentId || 'offline_admin',
+                type: 'payment_due',
+                target: item.target || ADMIN_WHATSAPP_TARGET,
+                status: item.status,
+                messagePreview: item.messagePreview,
+                providerDetail: item.detail,
+              });
+              if (item.status === 'sent') {
+                await adminRecordDueNotificationSent(item.studentId, nowIso).catch(() => {});
+              }
+            }
+          }
+        }
+      } catch {
+        // Non-blocking sync
+      } finally {
+        setDueSyncing(false);
+      }
+    },
+    [user]
+  );
+
+  const loadAdminData = useCallback(async () => {
+    setBundleLoading(true);
+    try {
+      const data = await fetchAdminBundle();
+      setBundle(data);
+      if (data?.students) {
+        void syncDueRemindersWithServer(data.students);
+      }
+    } finally {
+      setBundleLoading(false);
+    }
+  }, [syncDueRemindersWithServer]);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      setServerAuthState({ checking: false, authorized: false, fonnteConfigured: false });
+      return;
+    }
+
+    let cancelled = false;
+    async function verifyBackendAdmin() {
+      setServerAuthState({ checking: true, authorized: false, fonnteConfigured: false });
+      try {
+        const token = await user!.getIdToken();
+        const res = await fetch('/api/admin/verify', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const json = (await res.json()) as {
+          authorized?: boolean;
+          fonnteConfigured?: boolean;
+          error?: string;
+        };
+
+        if (cancelled) return;
+        if (res.ok && json.authorized) {
+          setServerAuthState({
+            checking: false,
+            authorized: true,
+            fonnteConfigured: Boolean(json.fonnteConfigured),
+          });
+          loadAdminData();
+        } else {
+          setServerAuthState({
+            checking: false,
+            authorized: false,
+            fonnteConfigured: false,
+            error:
+              json.error ||
+              'Akses admin ditolak oleh verifikasi server.',
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setServerAuthState({
+            checking: false,
+            authorized: false,
+            fonnteConfigured: false,
+            error: 'Gagal memverifikasi otorisasi admin dengan server.',
+          });
+        }
+      }
+    }
+
+    verifyBackendAdmin();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, authLoading, loadAdminData]);
+
+  const filteredStudents = useMemo(() => {
+    if (!bundle) return [];
+    const q = searchQuery.trim().toLowerCase();
+    return bundle.students.filter((s) => {
+      if (statusFilter !== 'all' && s.status !== statusFilter) return false;
+      if (branchFilter !== 'all' && s.branchId !== branchFilter) return false;
+      if (!q) return true;
+      return (
+        s.childName.toLowerCase().includes(q) ||
+        s.parentName.toLowerCase().includes(q) ||
+        s.parentEmail.toLowerCase().includes(q) ||
+        s.parentPhone.toLowerCase().includes(q)
+      );
+    });
+  }, [bundle, searchQuery, statusFilter, branchFilter]);
+
+  const reportStudents = useMemo(() => {
+    if (!bundle) return [];
+    return bundle.students.filter((s) => {
+      if (reportBranch !== 'all' && s.branchId !== reportBranch) return false;
+      if (reportStatus !== 'all' && s.status !== reportStatus) return false;
+      return true;
+    });
+  }, [bundle, reportBranch, reportStatus]);
+
+  const selectedInvoice = useMemo(() => {
+    if (!bundle || selectedInvoiceId === 'all') return null;
+    return bundle.payments.find((p) => p.id === selectedInvoiceId) || null;
+  }, [bundle, selectedInvoiceId]);
+
+  const dueMonitorStudents = useMemo(() => {
+    if (!bundle) return [];
+    return bundle.students
+      .filter((s) => s.status !== 'rejected' && Boolean(s.nextDueAtIso))
+      .sort((a, b) => {
+        const aDue = isPaymentDueNow(a.nextDueAtIso, a.dueConfirmedIso) ? 0 : 1;
+        const bDue = isPaymentDueNow(b.nextDueAtIso, b.dueConfirmedIso) ? 0 : 1;
+        if (aDue !== bDue) return aDue - bDue;
+        return (a.nextDueAtIso || '').localeCompare(b.nextDueAtIso || '');
+      });
+  }, [bundle]);
+
+  const dueCount = useMemo(
+    () =>
+      dueMonitorStudents.filter((s) => isPaymentDueNow(s.nextDueAtIso, s.dueConfirmedIso)).length,
+    [dueMonitorStudents]
+  );
+
+  // Sync offline draft billingAmount when package or branch changes (if admin has set a price)
+  useEffect(() => {
+    if (!bundle) return;
+    const pkg = bundle.packages.find((p) => p.slug === offlineDraft.packageId);
+    const price = getPackagePriceForBranch(pkg, offlineDraft.branchId);
+    if (price !== null) {
+      setOfflineDraft((prev) => ({ ...prev, billingAmount: price }));
+    }
+  }, [bundle, offlineDraft.packageId, offlineDraft.branchId]);
+
+  if (authLoading || serverAuthState.checking) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 text-sm text-slate-600">
+        Memverifikasi otorisasi administrator...
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-md w-full ios-glass-strong rounded-3xl p-6 sm:p-8 space-y-5">
+          <div className="flex items-center gap-3">
+            <img
+              src={BRAND_IDENTITY.emblemLogoPath}
+              alt="TOMOYO Admin"
+              className="w-11 h-11 object-contain rounded-xl bg-white p-1 shadow-xs"
+              referrerPolicy="no-referrer"
+            />
+            <div>
+              <h1 className="text-lg font-bold text-slate-900">Panel Administrasi TOMOYO</h1>
+              <p className="text-xs text-slate-500">Login khusus admin terotorisasi</p>
+            </div>
+          </div>
+
+          {authError && (
+            <div role="alert" className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800">
+              {authError}
+            </div>
+          )}
+
+          <GoogleSignInButton label="Masuk Admin dengan Google" className="w-full rounded-2xl" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!serverAuthState.authorized) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-lg w-full ios-glass-strong border-rose-200 rounded-3xl p-6 sm:p-8 space-y-4">
+          <div className="flex items-center gap-3 text-rose-700">
+            <ShieldAlert className="w-6 h-6 shrink-0" />
+            <h1 className="text-lg font-bold">Akses Administrator Ditolak</h1>
+          </div>
+          <p className="text-sm text-slate-700 leading-relaxed">
+            {serverAuthState.error ||
+              'Akun Google yang sedang masuk tidak cocok dengan kebijakan otorisasi admin pada project Firebase tomoyoindramayu.'}
+          </p>
+          <div className="ios-glass-subtle rounded-2xl p-4 text-xs font-mono space-y-1 text-slate-700">
+            <p>Akun Anda saat ini:</p>
+            <p>Email: {user.email || '-'}</p>
+            <p>UID: {user.uid}</p>
+            <p>Email Verified: {String(user.emailVerified)}</p>
+            <p className="pt-2 text-slate-500">
+              Syarat Admin: {ADMIN_EMAIL} · UID {ADMIN_UID} · Verified true
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => logout()}
+            className="px-4 py-2.5 text-sm font-semibold text-white bg-slate-900 rounded-xl cursor-pointer"
+          >
+            Keluar &amp; Ganti Akun
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const handleQuickDecision = async (
+    student: StudentRecord,
+    decision: 'approved' | 'rejected'
+  ) => {
+    setActionBusy(true);
+    try {
+      await adminUpdateStudent(student.id, {
+        status: decision,
+        academicStatus: decision === 'approved' ? 'aktif' : 'nonaktif',
+      });
+      await loadAdminData();
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleAdminStudentPhotoUpload = async (file: File | undefined) => {
+    if (!file || !selectedStudent) return;
+    setStudentPhotoUploading(true);
+    try {
+      const res = await uploadImageToCloudinary(file);
+      setSelectedStudent({ ...selectedStudent, childPhotoUrl: res.secureUrl });
+    } finally {
+      setStudentPhotoUploading(false);
+    }
+  };
+
+  const handleSaveSelectedStudent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedStudent || !bundle) return;
+    const pkg = bundle.packages.find((p) => p.slug === selectedStudent.packageId);
+    const branch = bundle.branches.find((b) => b.slug === selectedStudent.branchId);
+
+    setActionBusy(true);
+    try {
+      await adminUpdateStudent(selectedStudent.id, {
+        childName: selectedStudent.childName,
+        childPhotoUrl: selectedStudent.childPhotoUrl,
+        childGender: selectedStudent.childGender,
+        gradeLevel: selectedStudent.gradeLevel,
+        packageId: selectedStudent.packageId,
+        packageName: pkg ? `${pkg.title} (${pkg.programType})` : selectedStudent.packageName,
+        branchId: selectedStudent.branchId,
+        branchName: branch ? branch.name : selectedStudent.branchName,
+        billingAmount: selectedStudent.billingAmount,
+        initialPaymentStatus: selectedStudent.initialPaymentStatus,
+        status: selectedStudent.status,
+        academicStatus: selectedStudent.academicStatus,
+        parentPhone: selectedStudent.parentPhone,
+        adminNotes: selectedStudent.adminNotes || '',
+      });
+      setSelectedStudent(null);
+      await loadAdminData();
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleOfflinePhotoUpload = async (file: File | undefined) => {
+    if (!file) return;
+    setOfflinePhotoUploading(true);
+    try {
+      const res = await uploadImageToCloudinary(file);
+      setOfflineDraft((prev) => ({ ...prev, childPhotoUrl: res.secureUrl }));
+    } catch (err) {
+      setOfflineErrors([
+        err instanceof Error ? err.message : 'Gagal mengunggah foto anak ke Cloudinary.',
+      ]);
+    } finally {
+      setOfflinePhotoUploading(false);
+    }
+  };
+
+  const handleCreateOfflineStudent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bundle) return;
+    setOfflineErrors([]);
+    setOfflineBanner(null);
+
+    const check = validateOfflineRegistrationDraft(offlineDraft);
+    if (!check.valid) {
+      setOfflineErrors(check.errors);
+      return;
+    }
+
+    setActionBusy(true);
+    try {
+      const token = await user.getIdToken();
+      const res = await adminCreateOfflineStudent({
+        draft: offlineDraft,
+        packages: bundle.packages,
+        branches: bundle.branches,
+        adminUid: user.uid,
+        idToken: token,
+      });
+
+      setOfflineBanner({
+        type: res.waStatus === 'sent' ? 'success' : 'warning',
+        text:
+          res.waStatus === 'sent'
+            ? `Pendaftaran offline atas nama ${offlineDraft.childName} berhasil disimpan (Status: Disetujui & Aktif). Notifikasi WhatsApp Fonnte terkirim & jadwal jatuh tempo berikutnya: ${formatJakartaDateTime(
+                res.nextDueAtIso
+              )}.`
+            : `Pendaftaran offline atas nama ${offlineDraft.childName} berhasil disimpan (Status: Disetujui & Aktif). Jadwal jatuh tempo: ${formatJakartaDateTime(
+                res.nextDueAtIso
+              )}. Catatan WA: ${res.waDetail}`,
+      });
+
+      setOfflineDraft(createInitialOfflineDraft());
+      await loadAdminData();
+    } catch (err) {
+      setOfflineErrors([
+        err instanceof Error ? err.message : 'Gagal menyimpan pendaftaran offline.',
+      ]);
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const openConfirmDueModal = (student: StudentRecord) => {
+    const pkg = bundle?.packages.find((p) => p.slug === student.packageId);
+    const liveBranchPrice = getPackagePriceForBranch(pkg, student.branchId);
+    const defaultNominal =
+      typeof student.billingAmount === 'number'
+        ? student.billingAmount
+        : liveBranchPrice ?? 0;
+
+    setConfirmDueStudent(student);
+    setConfirmDueAmount(String(defaultNominal));
+    setConfirmDueMethod('Tunai');
+    setConfirmDueStatus('lunas');
+    setConfirmDuePeriod(
+      `Konfirmasi Jatuh Tempo (${new Date().toLocaleDateString('id-ID', {
+        month: 'long',
+        year: 'numeric',
+      })})`
+    );
+    setConfirmDueNotes('Konfirmasi pembayaran bulanan oleh admin');
+  };
+
+  const handleConfirmDueSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!confirmDueStudent) return;
+    setActionBusy(true);
+    setDueActionMsg(null);
+    try {
+      const token = await user.getIdToken();
+      const res = await adminConfirmStudentDuePayment({
+        student: confirmDueStudent,
+        idToken: token,
+        adminUid: user.uid,
+        recordPayment: {
+          amount: Math.max(0, Number(confirmDueAmount) || 0),
+          method: confirmDueMethod,
+          status: confirmDueStatus,
+          periodLabel: confirmDuePeriod,
+          notes: confirmDueNotes,
+        },
+      });
+      setDueActionMsg(
+        `Jatuh tempo ${confirmDueStudent.childName} telah dikonfirmasi admin. Jadwal jatuh tempo berikutnya diperpanjang ke ${formatJakartaDateTime(
+          res.nextDueAtIso
+        )}.`
+      );
+      setConfirmDueStudent(null);
+      await loadAdminData();
+    } catch (err) {
+      setDueActionMsg(
+        err instanceof Error ? err.message : 'Gagal mengonfirmasi jatuh tempo pembayaran.'
+      );
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleSendDueReminderNow = async (student: StudentRecord, sendToParent: boolean) => {
+    setActionBusy(true);
+    setDueActionMsg(null);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch('/api/admin/due-reminders/send-now', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          studentId: student.id,
+          childName: student.childName,
+          parentName: student.parentName,
+          parentPhone: student.parentPhone,
+          packageName: student.packageName,
+          branchName: student.branchName,
+          registeredAtIso: student.registeredAtIso,
+          dueAtIso: student.nextDueAtIso || new Date().toISOString(),
+          billingAmount: student.billingAmount ?? null,
+          sendToParent,
+        }),
+      });
+      const json = (await res.json()) as {
+        status?: 'sent' | 'failed' | 'unconfigured' | 'skipped_duplicate';
+        target?: string;
+        detail?: string;
+        messagePreview?: string;
+      };
+      const deliveryStatus = json.status || (res.ok ? 'sent' : 'failed');
+      await adminCreateNotificationLog({
+        registrationId: student.id,
+        parentId: student.parentId || 'offline_admin',
+        type: sendToParent ? 'manual_reminder' : 'payment_due',
+        target: json.target || ADMIN_WHATSAPP_TARGET,
+        status: deliveryStatus,
+        messagePreview: json.messagePreview || `Pengingat jatuh tempo ${student.childName}`,
+        providerDetail: json.detail || 'Selesai memproses kirim notifikasi jatuh tempo.',
+      });
+      if (deliveryStatus === 'sent' && !sendToParent) {
+        await adminRecordDueNotificationSent(student.id, new Date().toISOString());
+      }
+      setDueActionMsg(
+        `Pengiriman WA (${sendToParent ? 'ke Orang Tua' : 'ke Admin'}) untuk ${student.childName}: ${deliveryStatus.toUpperCase()} — ${
+          json.detail || ''
+        }`
+      );
+      await loadAdminData();
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleConfirmDeleteStudent = async () => {
+    if (!confirmDeleteStudent) return;
+    setActionBusy(true);
+    try {
+      await adminDeleteStudentSafely(confirmDeleteStudent.id);
+      setConfirmDeleteStudent(null);
+      await loadAdminData();
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleCreatePayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bundle) return;
+    const student = bundle.students.find((s) => s.id === payStudentId);
+    if (!student) {
+      setPayMsg('Pilih siswa terlebih dahulu.');
+      return;
+    }
+    setActionBusy(true);
+    setPayMsg(null);
+    try {
+      await adminCreatePayment({
+        studentId: student.id,
+        parentId: student.parentId,
+        childName: student.childName,
+        amount: Number(payAmount) || 0,
+        method: payMethod,
+        periodLabel: payPeriod,
+        status: payStatus,
+        notes: payNotes,
+        recordedBy: user.uid,
+      });
+      setPayAmount('');
+      setPayPeriod('');
+      setPayNotes('');
+      setPayMsg('Catatan pembayaran manual berhasil disimpan.');
+      await loadAdminData();
+    } catch (err) {
+      setPayMsg(err instanceof Error ? err.message : 'Gagal mencatat pembayaran.');
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleSavePaymentEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPayment) return;
+    setActionBusy(true);
+    try {
+      await adminUpdatePayment(editingPayment.id, {
+        amount: editingPayment.amount,
+        method: editingPayment.method,
+        periodLabel: editingPayment.periodLabel,
+        status: editingPayment.status,
+        notes: editingPayment.notes || '',
+      });
+      setEditingPayment(null);
+      await loadAdminData();
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleTestWhatsapp = async () => {
+    setWaTesting(true);
+    setWaTestResult(null);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch('/api/admin/test-whatsapp', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = (await res.json()) as { status?: string; detail?: string; error?: string };
+      setWaTestResult({
+        status: json.status || (res.ok ? 'sent' : 'failed'),
+        detail: json.detail || json.error || 'Selesai memproses uji kirim.',
+      });
+    } catch (err) {
+      setWaTestResult({
+        status: 'failed',
+        detail: err instanceof Error ? err.message : 'Gagal menghubungi endpoint uji kirim.',
+      });
+    } finally {
+      setWaTesting(false);
+    }
+  };
+
+  const openInvoicePdfForPayment = (paymentId: string) => {
+    setReportCategory('invoice');
+    setSelectedInvoiceId(paymentId);
+    setActiveTab('reports');
+  };
+
+  const totalStudents = bundle?.students.length ?? 0;
+  const pendingStudents = bundle?.students.filter((s) => s.status === 'pending').length ?? 0;
+  const approvedStudents = bundle?.students.filter((s) => s.status === 'approved').length ?? 0;
+  const rejectedStudents = bundle?.students.filter((s) => s.status === 'rejected').length ?? 0;
+  const kotaCount =
+    bundle?.students.filter((s) => s.branchId === 'indramayu-kota').length ?? 0;
+  const terisiCount = bundle?.students.filter((s) => s.branchId === 'terisi').length ?? 0;
+  const totalPaymentsAmount =
+    bundle?.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) ?? 0;
+
+  return (
+    <div className="min-h-screen flex flex-col lg:flex-row">
+      {/* Sidebar */}
+      <aside className="lg:w-64 bg-slate-900/95 backdrop-blur-xl text-slate-200 border-b lg:border-b-0 lg:border-r border-slate-800 shrink-0 no-print">
+        <div className="p-5 border-b border-slate-800 flex items-center gap-3">
+          <img
+            src={BRAND_IDENTITY.emblemLogoPath}
+            alt="Admin TOMOYO"
+            className="w-9 h-9 rounded-lg bg-white p-0.5 object-contain shrink-0"
+            referrerPolicy="no-referrer"
+          />
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-white truncate">Admin TOMOYO</p>
+            <p className="text-[11px] text-slate-400 truncate">{user.email}</p>
+          </div>
+        </div>
+
+        <nav className="p-3 flex lg:flex-col gap-1 overflow-x-auto">
+          {[
+            { id: 'overview', label: 'Ringkasan', icon: LayoutDashboard },
+            { id: 'students', label: 'Siswa & Pendaftaran', icon: Users },
+            { id: 'offline', label: 'Pendaftaran Offline', icon: UserPlus },
+            { id: 'cms', label: 'CMS Website', icon: Settings },
+            { id: 'payments', label: 'Pembayaran', icon: CreditCard },
+            { id: 'reports', label: 'Laporan & Ekspor PDF', icon: FileText },
+            { id: 'whatsapp', label: 'WhatsApp Fonnte', icon: MessageSquare, badge: dueCount },
+          ].map((item) => {
+            const Icon = item.icon;
+            const active = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveTab(item.id as AdminTab)}
+                className={`flex items-center justify-between gap-2 px-3.5 py-2.5 min-h-[42px] rounded-xl text-sm font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                  active
+                    ? 'bg-rose-700 text-white font-semibold shadow-sm'
+                    : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                }`}
+              >
+                <span className="flex items-center gap-2.5">
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span>{item.label}</span>
+                </span>
+                {typeof item.badge === 'number' && item.badge > 0 && (
+                  <span
+                    className={`px-2 py-0.5 text-[11px] font-bold rounded-full tabular-nums ${
+                      active ? 'bg-white text-rose-700' : 'bg-rose-600 text-white'
+                    }`}
+                  >
+                    {item.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="p-3 border-t border-slate-800 hidden lg:block">
+          <button
+            type="button"
+            onClick={() => logout()}
+            className="flex items-center gap-2.5 w-full px-3.5 py-2.5 text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white rounded-xl cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Keluar Admin</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Viewport */}
+      <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-6xl w-full space-y-6">
+        <div className="flex items-center justify-between gap-4 border-b border-slate-200/70 pb-4 no-print">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
+              {activeTab === 'overview' && 'Ringkasan Lembaga'}
+              {activeTab === 'students' && 'Manajemen Siswa & Pendaftaran'}
+              {activeTab === 'offline' && 'Pendaftaran Siswa Offline (Input Admin)'}
+              {activeTab === 'cms' && 'CMS Konten Website'}
+              {activeTab === 'payments' && 'Catatan Pembayaran Manual'}
+              {activeTab === 'reports' && 'Pusat Ekspor PDF & Invoice'}
+              {activeTab === 'whatsapp' && 'Notifikasi WhatsApp Fonnte & Jatuh Tempo'}
+            </h1>
+            <p className="text-xs text-slate-500">
+              Project Firebase: tomoyoindramayu · Otorisasi backend terverifikasi
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => logout()}
+            className="lg:hidden inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 ios-glass rounded-xl"
+          >
+            <LogOut className="w-4 h-4" />
+            <span>Keluar</span>
+          </button>
+        </div>
+
+        {bundleLoading && !bundle ? (
+          <div className="py-12 text-center text-sm text-slate-500">Memuat data admin...</div>
+        ) : (
+          <>
+            {/* OVERVIEW TAB */}
+            {activeTab === 'overview' && (
+              <div className="space-y-6">
+                {dueCount > 0 && (
+                  <div className="ios-glass border-amber-300 bg-amber-50/85 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <BellRing className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-bold text-amber-950">
+                          {dueCount} Siswa Sudah Masuk Jatuh Tempo Pembayaran Bulanan
+                        </p>
+                        <p className="text-xs text-amber-900 mt-0.5">
+                          Segera cek notifikasi Fonnte dan lakukan konfirmasi pembayaran admin agar jadwal bulan berikutnya diperpanjang otomatis.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('whatsapp')}
+                      className="px-4 py-2 text-xs font-bold text-white bg-amber-700 hover:bg-amber-800 rounded-xl whitespace-nowrap cursor-pointer"
+                    >
+                      Buka Konfirmasi Jatuh Tempo
+                    </button>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="ios-glass rounded-2xl p-5">
+                    <p className="text-xs font-medium text-slate-500">Total Pendaftaran</p>
+                    <p className="mt-1 text-2xl font-extrabold text-slate-900 tabular-nums">
+                      {totalStudents}
+                    </p>
+                  </div>
+                  <div className="ios-glass rounded-2xl p-5">
+                    <p className="text-xs font-medium text-slate-500">Menunggu Persetujuan</p>
+                    <p className="mt-1 text-2xl font-extrabold text-amber-700 tabular-nums">
+                      {pendingStudents}
+                    </p>
+                  </div>
+                  <div className="ios-glass rounded-2xl p-5">
+                    <p className="text-xs font-medium text-slate-500">Disetujui</p>
+                    <p className="mt-1 text-2xl font-extrabold text-emerald-700 tabular-nums">
+                      {approvedStudents}
+                    </p>
+                  </div>
+                  <div className="ios-glass rounded-2xl p-5">
+                    <p className="text-xs font-medium text-slate-500">Ditolak</p>
+                    <p className="mt-1 text-2xl font-extrabold text-rose-700 tabular-nums">
+                      {rejectedStudents}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="ios-glass rounded-2xl p-5 space-y-2">
+                    <h2 className="text-sm font-bold text-slate-900">Ringkasan Cabang</h2>
+                    <div className="flex justify-between text-sm py-1.5 border-b border-slate-200/70">
+                      <span className="text-slate-600">Indramayu Kota (Pusat)</span>
+                      <span className="font-mono font-bold tabular-nums">{kotaCount} siswa</span>
+                    </div>
+                    <div className="flex justify-between text-sm py-1.5">
+                      <span className="text-slate-600">Kecamatan Terisi (Cabang)</span>
+                      <span className="font-mono font-bold tabular-nums">{terisiCount} siswa</span>
+                    </div>
+                  </div>
+
+                  <div className="ios-glass rounded-2xl p-5 space-y-2">
+                    <h2 className="text-sm font-bold text-slate-900">Ringkasan Pembayaran Manual</h2>
+                    {bundle?.payments.length ? (
+                      <>
+                        <p className="text-2xl font-extrabold text-slate-900 font-mono tabular-nums">
+                          Rp {totalPaymentsAmount.toLocaleString('id-ID')}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          Dari {bundle.payments.length} catatan pembayaran manual.
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-sm text-slate-500">
+                        Belum ada catatan pembayaran yang dimasukkan.
+                      </p>
+                    )}
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('offline')}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-rose-700 rounded-xl cursor-pointer"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span>Input Pendaftaran Offline Baru</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* STUDENTS TAB WITH PHOTO THUMBNAIL */}
+            {activeTab === 'students' && (
+              <div className="space-y-4">
+                <div className="ios-glass rounded-2xl p-4 flex flex-col sm:flex-row gap-3">
+                  <div className="relative flex-1">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Cari nama siswa, orang tua, email, atau HP..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 min-h-[42px] text-sm bg-white/85 border border-slate-300/80 rounded-xl"
+                    />
+                  </div>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+                    className="px-3 py-2 min-h-[42px] text-sm bg-white/85 border border-slate-300/80 rounded-xl"
+                  >
+                    <option value="all">Semua Status</option>
+                    <option value="pending">Menunggu Persetujuan</option>
+                    <option value="approved">Disetujui</option>
+                    <option value="rejected">Ditolak</option>
+                  </select>
+                  <select
+                    value={branchFilter}
+                    onChange={(e) => setBranchFilter(e.target.value as typeof branchFilter)}
+                    className="px-3 py-2 min-h-[42px] text-sm bg-white/85 border border-slate-300/80 rounded-xl"
+                  >
+                    <option value="all">Semua Cabang</option>
+                    <option value="indramayu-kota">Indramayu Kota</option>
+                    <option value="terisi">Kecamatan Terisi</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('offline')}
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 min-h-[42px] text-xs font-bold text-white bg-slate-900 hover:bg-rose-700 rounded-xl whitespace-nowrap cursor-pointer"
+                  >
+                    <UserPlus className="w-4 h-4" />
+                    <span>+ Pendaftaran Offline</span>
+                  </button>
+                </div>
+
+                {filteredStudents.length === 0 ? (
+                  <div className="ios-glass rounded-2xl p-10 text-center text-sm text-slate-600">
+                    Belum ada data pendaftaran yang sesuai dengan filter.
+                  </div>
+                ) : (
+                  <div className="ios-glass rounded-2xl overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-200/80 bg-white/60 text-xs text-slate-600">
+                          <th className="py-3 px-4 font-semibold">Foto &amp; Siswa</th>
+                          <th className="py-3 px-4 font-semibold">Orang Tua</th>
+                          <th className="py-3 px-4 font-semibold">Paket, Cabang &amp; Tarif</th>
+                          <th className="py-3 px-4 font-semibold">Status &amp; Jatuh Tempo</th>
+                          <th className="py-3 px-4 font-semibold text-right">Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200/70">
+                        {filteredStudents.map((student) => {
+                          const isDue =
+                            student.status !== 'rejected' &&
+                            isPaymentDueNow(student.nextDueAtIso, student.dueConfirmedIso);
+                          return (
+                            <tr key={student.id} className="hover:bg-white/50 transition-colors">
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-3">
+                                  {student.childPhotoUrl ? (
+                                    <img
+                                      src={student.childPhotoUrl}
+                                      alt={`Foto ${student.childName}`}
+                                      className="w-11 h-11 rounded-xl object-cover border border-white shadow-xs shrink-0"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  ) : (
+                                    <div className="w-11 h-11 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+                                      <User className="w-5 h-5 text-slate-400" />
+                                    </div>
+                                  )}
+                                  <div>
+                                    <p className="font-bold text-slate-900">{student.childName}</p>
+                                    <p className="text-xs text-slate-500">
+                                      {student.gradeLevel}
+                                      {student.childGender ? ` · ${student.childGender}` : ''}
+                                    </p>
+                                    <span
+                                      className={`inline-block mt-0.5 px-2 py-0.5 text-[10px] font-bold uppercase rounded-md ${
+                                        student.registrationChannel === 'offline'
+                                          ? 'bg-indigo-100 text-indigo-800'
+                                          : 'bg-sky-100 text-sky-800'
+                                      }`}
+                                    >
+                                      {student.registrationChannel === 'offline' ? 'Offline Admin' : 'Online Ortu'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <p className="font-medium text-slate-900">{student.parentName}</p>
+                                <p className="text-xs text-slate-500">{student.parentPhone}</p>
+                                <p className="text-[11px] text-slate-400">
+                                  {student.parentEmail || 'Pendaftaran tanpa email (offline)'}
+                                </p>
+                              </td>
+                              <td className="py-3 px-4 text-xs text-slate-700 space-y-0.5">
+                                <p className="font-semibold">{student.packageName}</p>
+                                <p className="text-slate-500">{student.branchName}</p>
+                                {typeof student.billingAmount === 'number' && (
+                                  <p className="font-mono font-bold text-slate-900">
+                                    {formatRupiah(student.billingAmount)}
+                                    {student.initialPaymentStatus
+                                      ? ` (${getPaymentStatusLabel(student.initialPaymentStatus)})`
+                                      : ''}
+                                  </p>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-xs space-y-0.5">
+                                <p
+                                  className={`font-semibold ${
+                                    student.status === 'approved'
+                                      ? 'text-emerald-700'
+                                      : student.status === 'rejected'
+                                      ? 'text-rose-700'
+                                      : 'text-amber-700'
+                                  }`}
+                                >
+                                  {getStatusLabel(student.status)}
+                                </p>
+                                <p className="text-slate-500">
+                                  Belajar: {getAcademicStatusLabel(student.academicStatus)}
+                                </p>
+                                {student.nextDueAtIso && (
+                                  <p
+                                    className={`font-medium ${
+                                      isDue ? 'text-rose-700 font-bold' : 'text-slate-600'
+                                    }`}
+                                  >
+                                    {isDue ? 'JATUH TEMPO: ' : 'Jatuh Tempo: '}
+                                    {formatJakartaDateTime(student.nextDueAtIso)}
+                                  </p>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <div className="inline-flex items-center gap-1.5">
+                                  {student.status === 'pending' && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        disabled={actionBusy}
+                                        onClick={() => handleQuickDecision(student, 'approved')}
+                                        title="Setujui pendaftaran"
+                                        className="p-2 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-xl cursor-pointer"
+                                      >
+                                        <Check className="w-4 h-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={actionBusy}
+                                        onClick={() => handleQuickDecision(student, 'rejected')}
+                                        title="Tolak pendaftaran"
+                                        className="p-2 text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl cursor-pointer"
+                                      >
+                                        <X className="w-4 h-4" />
+                                      </button>
+                                    </>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedStudent(student)}
+                                    className="px-3 py-1.5 text-xs font-semibold text-slate-800 bg-white/80 hover:bg-white border border-slate-200 rounded-xl cursor-pointer"
+                                  >
+                                    Detail / Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteStudent(student)}
+                                    aria-label={`Hapus ${student.childName}`}
+                                    className="p-2 text-rose-700 hover:bg-rose-50 rounded-xl cursor-pointer"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* OFFLINE REGISTRATION TAB (ADMIN MANUAL INPUT) */}
+            {activeTab === 'offline' && bundle && (() => {
+              const selectedPkg = bundle.packages.find((p) => p.slug === offlineDraft.packageId);
+              const liveBranchPrice = getPackagePriceForBranch(selectedPkg, offlineDraft.branchId);
+              const parsedRegDate = offlineDraft.registeredAtLocal
+                ? new Date(offlineDraft.registeredAtLocal)
+                : new Date();
+              const validRegDate = Number.isNaN(parsedRegDate.getTime()) ? new Date() : parsedRegDate;
+              const previewNextDueIso = computeNextMonthlyDueDate(validRegDate).toISOString();
+
+              return (
+                <div className="space-y-6">
+                  <div className="ios-glass-subtle border-indigo-200 rounded-2xl p-4 text-xs sm:text-sm text-indigo-950">
+                    Gunakan formulir ini untuk mendaftarkan siswa secara <strong>offline / tatap muka</strong> bagi orang tua yang tidak memiliki smartphone atau kesulitan mendaftar lewat HP. Data langsung berstatus <strong>Disetujui &amp; Aktif</strong>, masuk ke buku kas pembayaran, dan terjadwal otomatis untuk pengingat jatuh tempo Fonnte (+1 bulan).
+                  </div>
+
+                  {offlineBanner && (
+                    <div
+                      role="status"
+                      className={`rounded-2xl p-4 border text-sm ${
+                        offlineBanner.type === 'success'
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                          : 'bg-amber-50 border-amber-200 text-amber-950'
+                      }`}
+                    >
+                      {offlineBanner.text}
+                    </div>
+                  )}
+
+                  {offlineErrors.length > 0 && (
+                    <div role="alert" className="rounded-2xl p-4 border border-rose-200 bg-rose-50 text-sm text-rose-900 space-y-1">
+                      <p className="font-bold">Periksa kembali data pendaftaran offline:</p>
+                      <ul className="list-disc pl-5 text-xs space-y-0.5">
+                        {offlineErrors.map((err, i) => (
+                          <li key={i}>{err}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <form
+                    onSubmit={handleCreateOfflineStudent}
+                    className="ios-glass rounded-3xl p-6 sm:p-8 space-y-6"
+                  >
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                          Nama Orang Tua / Wali *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="Nama lengkap orang tua/wali"
+                          value={offlineDraft.parentName}
+                          onChange={(e) =>
+                            setOfflineDraft((prev) => ({ ...prev, parentName: e.target.value }))
+                          }
+                          className="w-full px-3.5 py-2.5 text-sm bg-white/90 border border-slate-300 rounded-xl"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                          Nomor Telepon / WhatsApp Aktif *
+                        </label>
+                        <input
+                          type="tel"
+                          required
+                          placeholder="Contoh: 081234567890"
+                          value={offlineDraft.parentPhone}
+                          onChange={(e) =>
+                            setOfflineDraft((prev) => ({ ...prev, parentPhone: e.target.value }))
+                          }
+                          className="w-full px-3.5 py-2.5 text-sm bg-white/90 border border-slate-300 rounded-xl"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                          Nama Lengkap Anak *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="Nama lengkap siswa"
+                          value={offlineDraft.childName}
+                          onChange={(e) =>
+                            setOfflineDraft((prev) => ({ ...prev, childName: e.target.value }))
+                          }
+                          className="w-full px-3.5 py-2.5 text-sm bg-white/90 border border-slate-300 rounded-xl"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                          Jenis Kelamin Anak *
+                        </label>
+                        <select
+                          value={offlineDraft.childGender}
+                          onChange={(e) =>
+                            setOfflineDraft((prev) => ({
+                              ...prev,
+                              childGender: e.target.value as ChildGender,
+                            }))
+                          }
+                          className="w-full px-3.5 py-2.5 text-sm bg-white/90 border border-slate-300 rounded-xl"
+                        >
+                          <option value="Laki-laki">Laki-laki</option>
+                          <option value="Perempuan">Perempuan</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                          Kelas / Tingkat Pendidikan *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="Contoh: TK B / SD Kelas 3"
+                          value={offlineDraft.gradeLevel}
+                          onChange={(e) =>
+                            setOfflineDraft((prev) => ({ ...prev, gradeLevel: e.target.value }))
+                          }
+                          className="w-full px-3.5 py-2.5 text-sm bg-white/90 border border-slate-300 rounded-xl"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Foto Anak Upload Cloudinary (Ukuran Bebas) */}
+                    <div className="p-4 sm:p-5 rounded-2xl bg-white/75 border border-slate-200 space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-bold text-slate-800">
+                            Foto Anak (Wajib, Ukuran Bebas — Cloudinary) *
+                          </p>
+                          <p className="text-[11px] text-slate-500">
+                            Unggah foto langsung dari kamera/galeri admin (JPG, PNG, WEBP).
+                          </p>
+                        </div>
+                        <label className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold bg-slate-900 hover:bg-rose-700 text-white rounded-xl cursor-pointer shrink-0">
+                          <Upload className="w-4 h-4" />
+                          <span>
+                            {offlinePhotoUploading
+                              ? 'Mengunggah ke Cloudinary...'
+                              : offlineDraft.childPhotoUrl
+                              ? 'Ganti Foto Anak'
+                              : 'Upload Foto Anak'}
+                          </span>
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            className="hidden"
+                            onChange={(e) => handleOfflinePhotoUpload(e.target.files?.[0])}
+                          />
+                        </label>
+                      </div>
+                      {offlineDraft.childPhotoUrl && (
+                        <div className="flex items-center gap-4 pt-2">
+                          <img
+                            src={offlineDraft.childPhotoUrl}
+                            alt="Preview Foto Siswa Offline"
+                            className="max-h-40 w-auto rounded-xl object-contain border border-slate-200 bg-white p-1"
+                            referrerPolicy="no-referrer"
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setOfflineDraft((prev) => ({ ...prev, childPhotoUrl: '' }))
+                            }
+                            className="text-xs font-semibold text-rose-700 hover:underline cursor-pointer"
+                          >
+                            Hapus Foto
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Cabang & Paket dengan Harga Real-time */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                          Pilih Cabang *
+                        </label>
+                        <select
+                          value={offlineDraft.branchId}
+                          onChange={(e) =>
+                            setOfflineDraft((prev) => ({
+                              ...prev,
+                              branchId: e.target.value as BranchId,
+                            }))
+                          }
+                          className="w-full px-3.5 py-2.5 text-sm bg-white/90 border border-slate-300 rounded-xl"
+                        >
+                          {bundle.branches.map((b) => (
+                            <option key={b.id} value={b.slug}>
+                              {b.name} ({b.roleLabel})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                          Pilih Paket Belajar *
+                        </label>
+                        <select
+                          value={offlineDraft.packageId}
+                          onChange={(e) =>
+                            setOfflineDraft((prev) => ({
+                              ...prev,
+                              packageId: e.target.value as PackageId,
+                            }))
+                          }
+                          className="w-full px-3.5 py-2.5 text-sm bg-white/90 border border-slate-300 rounded-xl"
+                        >
+                          {bundle.packages.map((p) => {
+                            const branchPrice = getPackagePriceForBranch(p, offlineDraft.branchId);
+                            return (
+                              <option key={p.id} value={p.slug}>
+                                {p.title} —{' '}
+                                {branchPrice !== null
+                                  ? formatRupiah(branchPrice)
+                                  : 'Harga belum diatur'}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Info Harga Cabang & Pembayaran */}
+                    <div className="p-4 rounded-2xl bg-slate-50/90 border border-slate-200 space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span className="font-semibold text-slate-700">
+                          Tarif CMS Saat Ini untuk Cabang Terpilih:
+                        </span>
+                        <span
+                          className={`font-mono font-bold ${
+                            liveBranchPrice !== null ? 'text-emerald-700' : 'text-amber-700'
+                          }`}
+                        >
+                          {liveBranchPrice !== null
+                            ? formatRupiah(liveBranchPrice)
+                            : 'Harga belum diatur oleh admin — masukkan nominal manual di bawah'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-700 mb-1">
+                            Nominal yang Harus Dibayar (Rp) *
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            required
+                            placeholder="Contoh: 250000"
+                            value={offlineDraft.billingAmount}
+                            onChange={(e) =>
+                              setOfflineDraft((prev) => ({
+                                ...prev,
+                                billingAmount: e.target.value === '' ? '' : Number(e.target.value),
+                              }))
+                            }
+                            className="w-full px-3.5 py-2.5 text-sm font-mono bg-white border border-slate-300 rounded-xl"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-700 mb-1">
+                            Status Pembayaran *
+                          </label>
+                          <select
+                            value={offlineDraft.initialPaymentStatus}
+                            onChange={(e) =>
+                              setOfflineDraft((prev) => ({
+                                ...prev,
+                                initialPaymentStatus: e.target.value as PaymentStatus,
+                              }))
+                            }
+                            className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-xl"
+                          >
+                            <option value="lunas">Lunas</option>
+                            <option value="cicilan">Cicilan</option>
+                            <option value="belum_bayar">Belum Bayar</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-700 mb-1">
+                            Metode Pembayaran
+                          </label>
+                          <select
+                            value={offlineDraft.paymentMethod}
+                            onChange={(e) =>
+                              setOfflineDraft((prev) => ({
+                                ...prev,
+                                paymentMethod: e.target.value,
+                              }))
+                            }
+                            className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-xl"
+                          >
+                            <option value="Tunai">Tunai</option>
+                            <option value="Transfer">Transfer</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Tanggal Daftar & Preview Jatuh Tempo +1 Bulan */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-start">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                          Tanggal &amp; Jam Pendaftaran (Untuk Jadwal Jatuh Tempo)
+                        </label>
+                        <input
+                          type="datetime-local"
+                          required
+                          value={offlineDraft.registeredAtLocal}
+                          onChange={(e) =>
+                            setOfflineDraft((prev) => ({
+                              ...prev,
+                              registeredAtLocal: e.target.value,
+                            }))
+                          }
+                          className="w-full px-3.5 py-2.5 text-sm bg-white/90 border border-slate-300 rounded-xl"
+                        />
+                      </div>
+
+                      <div className="p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-200 text-xs text-emerald-950 space-y-1">
+                        <div className="flex items-center gap-1.5 font-bold">
+                          <CalendarClock className="w-4 h-4 text-emerald-700" />
+                          <span>Jadwal Notifikasi Jatuh Tempo Otomatis (+1 Bulan):</span>
+                        </div>
+                        <p className="font-mono font-bold text-emerald-800">
+                          {formatJakartaDateTime(previewNextDueIso)}
+                        </p>
+                        <p className="text-[11px] text-emerald-700">
+                          Fonnte akan mengirim pesan jatuh tempo pada tanggal &amp; jam tersebut untuk dikonfirmasi admin.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                        Catatan Tambahan Admin (Opsional)
+                      </label>
+                      <textarea
+                        rows={2}
+                        placeholder="Catatan khusus orang tua / jadwal masuk..."
+                        value={offlineDraft.notes}
+                        onChange={(e) =>
+                          setOfflineDraft((prev) => ({ ...prev, notes: e.target.value }))
+                        }
+                        className="w-full px-3.5 py-2.5 text-sm bg-white/90 border border-slate-300 rounded-xl"
+                      />
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOfflineDraft(createInitialOfflineDraft());
+                          setOfflineErrors([]);
+                          setOfflineBanner(null);
+                        }}
+                        className="px-4 py-2.5 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl cursor-pointer"
+                      >
+                        Reset Formulir
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={actionBusy || offlinePhotoUploading}
+                        className="px-6 py-2.5 text-sm font-bold text-white bg-slate-900 hover:bg-rose-700 rounded-xl cursor-pointer disabled:opacity-60"
+                      >
+                        {actionBusy ? 'Menyimpan...' : 'Simpan Pendaftaran Offline & Jadwalkan Fonnte'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              );
+            })()}
+
+            {/* CMS TAB */}
+            {activeTab === 'cms' && bundle && (
+              <AdminCmsPanel
+                packages={bundle.packages}
+                branches={bundle.branches}
+                teachers={bundle.teachers}
+                about={bundle.about}
+                founder={bundle.founder}
+                contact={bundle.contact}
+                gallery={bundle.gallery}
+                announcements={bundle.announcements}
+                schedules={bundle.schedules}
+                onSaved={async () => {
+                  await loadAdminData();
+                  await refreshPublicSite();
+                }}
+              />
+            )}
+
+            {/* PAYMENTS TAB WITH INVOICE PDF & EDIT */}
+            {activeTab === 'payments' && bundle && (
+              <div className="space-y-6">
+                <div className="ios-glass-subtle border-amber-200 rounded-2xl p-4 text-xs sm:text-sm text-amber-900">
+                  Pencatatan pembayaran di bawah ini bersifat <strong>manual oleh admin</strong> (tidak menggunakan payment gateway online otomatis). Anda dapat langsung mencetak invoice PDF dari setiap pembayaran.
+                </div>
+
+                <form
+                  onSubmit={handleCreatePayment}
+                  className="ios-glass rounded-2xl p-6 space-y-4"
+                >
+                  <h2 className="text-base font-bold text-slate-900">Catat Pembayaran Baru</h2>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    <select
+                      required
+                      value={payStudentId}
+                      onChange={(e) => setPayStudentId(e.target.value)}
+                      className="px-3 py-2 text-sm bg-white/85 border border-slate-300/80 rounded-xl"
+                    >
+                      <option value="">-- Pilih Siswa --</option>
+                      {bundle.students.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.childName} ({s.parentName})
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      min="0"
+                      required
+                      placeholder="Nominal (Rp)"
+                      value={payAmount}
+                      onChange={(e) => setPayAmount(e.target.value)}
+                      className="px-3 py-2 text-sm bg-white/85 border border-slate-300/80 rounded-xl"
+                    />
+                    <input
+                      type="text"
+                      required
+                      placeholder="Periode (mis. November 2026)"
+                      value={payPeriod}
+                      onChange={(e) => setPayPeriod(e.target.value)}
+                      className="px-3 py-2 text-sm bg-white/85 border border-slate-300/80 rounded-xl"
+                    />
+                    <input
+                      type="text"
+                      required
+                      placeholder="Metode (Tunai / Transfer)"
+                      value={payMethod}
+                      onChange={(e) => setPayMethod(e.target.value)}
+                      className="px-3 py-2 text-sm bg-white/85 border border-slate-300/80 rounded-xl"
+                    />
+                    <select
+                      value={payStatus}
+                      onChange={(e) => setPayStatus(e.target.value as PaymentStatus)}
+                      className="px-3 py-2 text-sm bg-white/85 border border-slate-300/80 rounded-xl"
+                    >
+                      <option value="lunas">Lunas</option>
+                      <option value="cicilan">Cicilan</option>
+                      <option value="belum_bayar">Belum Bayar</option>
+                    </select>
+                    <input
+                      type="text"
+                      placeholder="Catatan (opsional)"
+                      value={payNotes}
+                      onChange={(e) => setPayNotes(e.target.value)}
+                      className="px-3 py-2 text-sm bg-white/85 border border-slate-300/80 rounded-xl"
+                    />
+                  </div>
+                  {payMsg && <p className="text-xs font-semibold text-emerald-700">{payMsg}</p>}
+                  <button
+                    type="submit"
+                    disabled={actionBusy}
+                    className="px-5 py-2.5 text-sm font-semibold text-white bg-slate-900 hover:bg-rose-700 rounded-xl cursor-pointer"
+                  >
+                    Simpan Catatan Pembayaran
+                  </button>
+                </form>
+
+                {editingPayment && (
+                  <form onSubmit={handleSavePaymentEdit} className="ios-glass-strong rounded-2xl p-5 space-y-3 border-2 border-rose-300">
+                    <h3 className="text-sm font-bold text-slate-900">
+                      Edit Pembayaran: {editingPayment.childName}
+                    </h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      <input
+                        type="number"
+                        min="0"
+                        required
+                        value={editingPayment.amount}
+                        onChange={(e) =>
+                          setEditingPayment({ ...editingPayment, amount: Number(e.target.value) || 0 })
+                        }
+                        className="px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                      />
+                      <input
+                        type="text"
+                        required
+                        value={editingPayment.periodLabel}
+                        onChange={(e) =>
+                          setEditingPayment({ ...editingPayment, periodLabel: e.target.value })
+                        }
+                        className="px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                      />
+                      <input
+                        type="text"
+                        required
+                        value={editingPayment.method}
+                        onChange={(e) =>
+                          setEditingPayment({ ...editingPayment, method: e.target.value })
+                        }
+                        className="px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                      />
+                      <select
+                        value={editingPayment.status}
+                        onChange={(e) =>
+                          setEditingPayment({
+                            ...editingPayment,
+                            status: e.target.value as PaymentStatus,
+                          })
+                        }
+                        className="px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                      >
+                        <option value="lunas">Lunas</option>
+                        <option value="cicilan">Cicilan</option>
+                        <option value="belum_bayar">Belum Bayar</option>
+                      </select>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditingPayment(null)}
+                        className="px-3.5 py-2 text-xs font-semibold bg-slate-100 rounded-xl cursor-pointer"
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={actionBusy}
+                        className="px-4 py-2 text-xs font-semibold text-white bg-slate-900 rounded-xl cursor-pointer"
+                      >
+                        Simpan Pembayaran
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                <div className="ios-glass rounded-2xl overflow-x-auto">
+                  {bundle.payments.length === 0 ? (
+                    <p className="p-8 text-center text-sm text-slate-500">
+                      Belum ada catatan pembayaran.
+                    </p>
+                  ) : (
+                    <table className="w-full text-left border-collapse text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-200/80 bg-white/60 text-xs text-slate-600">
+                          <th className="py-3 px-4">Siswa</th>
+                          <th className="py-3 px-4">Periode</th>
+                          <th className="py-3 px-4">Metode</th>
+                          <th className="py-3 px-4">Nominal</th>
+                          <th className="py-3 px-4">Status</th>
+                          <th className="py-3 px-4 text-right">Aksi</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200/70">
+                        {bundle.payments.map((p) => (
+                          <tr key={p.id}>
+                            <td className="py-3 px-4 font-semibold">{p.childName}</td>
+                            <td className="py-3 px-4 text-xs">{p.periodLabel}</td>
+                            <td className="py-3 px-4 text-xs">{p.method}</td>
+                            <td className="py-3 px-4 font-mono tabular-nums">
+                              Rp {p.amount.toLocaleString('id-ID')}
+                            </td>
+                            <td className="py-3 px-4 text-xs font-semibold uppercase">
+                              {getPaymentStatusLabel(p.status)}
+                            </td>
+                            <td className="py-3 px-4 text-right">
+                              <div className="inline-flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => openInvoicePdfForPayment(p.id)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-rose-700 hover:bg-rose-800 rounded-lg cursor-pointer"
+                                >
+                                  <Printer className="w-3.5 h-3.5" />
+                                  <span>Invoice PDF</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingPayment(p)}
+                                  className="px-2.5 py-1.5 text-xs font-semibold bg-white border border-slate-200 rounded-lg cursor-pointer"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    await adminDeleteDoc('payments', p.id);
+                                    await loadAdminData();
+                                  }}
+                                  aria-label={`Hapus pembayaran ${p.childName}`}
+                                  className="p-1.5 text-rose-700 hover:bg-rose-50 rounded-lg cursor-pointer"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* MULTI-DATA PDF EXPORT CENTER TAB */}
+            {activeTab === 'reports' && bundle && (
+              <div className="space-y-4">
+                <div className="ios-glass rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 no-print">
+                  <div className="flex flex-wrap gap-3">
+                    <select
+                      aria-label="Jenis Data Ekspor PDF"
+                      value={reportCategory}
+                      onChange={(e) => setReportCategory(e.target.value as ReportCategory)}
+                      className="px-3 py-2 text-sm font-semibold bg-white border border-slate-300 rounded-xl"
+                    >
+                      <option value="students">1. Data Murid &amp; Pendaftaran</option>
+                      <option value="invoice">2. Invoice / Tagihan Pembayaran</option>
+                      <option value="teachers">3. Data Guru &amp; Pengajar</option>
+                      <option value="schedules">4. Jadwal Belajar Resmi</option>
+                      <option value="packages">5. Paket &amp; Harga Pembelajaran</option>
+                      <option value="branches">6. Cabang &amp; Pengumuman Resmi</option>
+                    </select>
+
+                    {reportCategory === 'students' && (
+                      <>
+                        <select
+                          value={reportBranch}
+                          onChange={(e) => setReportBranch(e.target.value as typeof reportBranch)}
+                          className="px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                        >
+                          <option value="all">Semua Cabang</option>
+                          <option value="indramayu-kota">Indramayu Kota (Pusat)</option>
+                          <option value="terisi">Kecamatan Terisi (Cabang)</option>
+                        </select>
+                        <select
+                          value={reportStatus}
+                          onChange={(e) => setReportStatus(e.target.value as typeof reportStatus)}
+                          className="px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                        >
+                          <option value="all">Semua Status</option>
+                          <option value="pending">Menunggu</option>
+                          <option value="approved">Disetujui</option>
+                          <option value="rejected">Ditolak</option>
+                        </select>
+                      </>
+                    )}
+
+                    {reportCategory === 'invoice' && (
+                      <select
+                        aria-label="Pilih Invoice Tagihan"
+                        value={selectedInvoiceId}
+                        onChange={(e) => setSelectedInvoiceId(e.target.value)}
+                        className="px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                      >
+                        <option value="all">Rekap Semua Invoice Pembayaran</option>
+                        {bundle.payments.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            Invoice: {p.childName} — {p.periodLabel} (Rp {p.amount.toLocaleString('id-ID')})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-slate-900 hover:bg-rose-700 rounded-xl shadow-sm cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>Cetak / Ekspor PDF</span>
+                  </button>
+                </div>
+
+                {/* Printable A4 Sheet */}
+                <div className="ios-glass-strong rounded-2xl p-6 sm:p-8 space-y-5 bg-white">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b-2 border-slate-900 pb-4">
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={BRAND_IDENTITY.emblemLogoPath}
+                        alt={BRAND_IDENTITY.officialName}
+                        className="w-12 h-12 object-contain"
+                        referrerPolicy="no-referrer"
+                      />
+                      <div>
+                        <h2 className="text-lg font-extrabold text-slate-900">
+                          {BRAND_IDENTITY.officialName}
+                        </h2>
+                        <p className="text-xs text-slate-600">
+                          {reportCategory === 'students' && 'Laporan Resmi Data Murid & Pendaftaran'}
+                          {reportCategory === 'invoice' &&
+                            (selectedInvoice
+                              ? `INVOICE / TAGIHAN PEMBAYARAN #${selectedInvoice.id.slice(0, 8).toUpperCase()}`
+                              : 'Rekapitulasi Invoice & Pembayaran Siswa')}
+                          {reportCategory === 'teachers' && 'Daftar Tenaga Pendidik & Guru Resmi'}
+                          {reportCategory === 'schedules' && 'Jadwal Pembelajaran Resmi'}
+                          {reportCategory === 'packages' && 'Daftar Paket & Biaya Belajar Resmi'}
+                          {reportCategory === 'branches' && 'Data Cabang Resmi & Pengumuman Lembaga'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-left sm:text-right text-xs text-slate-500">
+                      <p>Tanggal Cetak: {new Date().toLocaleDateString('id-ID')}</p>
+                      <p>{bundle.contact.whatsappDisplay || '0821-1977-0700'}</p>
+                    </div>
+                  </div>
+
+                  {/* 1. STUDENTS PDF TABLE */}
+                  {reportCategory === 'students' && (
+                    reportStudents.length === 0 ? (
+                      <p className="text-sm text-slate-500 py-6 text-center">
+                        Tidak ada data siswa untuk filter yang dipilih.
+                      </p>
+                    ) : (
+                      <table className="w-full text-left border-collapse text-xs sm:text-sm">
+                        <thead>
+                          <tr className="border-b border-slate-300 text-slate-700">
+                            <th className="py-2 pr-3">Foto</th>
+                            <th className="py-2 pr-3">Nama Siswa &amp; Gender</th>
+                            <th className="py-2 pr-3">Kelas</th>
+                            <th className="py-2 pr-3">Paket &amp; Jalur</th>
+                            <th className="py-2 pr-3">Cabang</th>
+                            <th className="py-2 pr-3">Orang Tua</th>
+                            <th className="py-2">Status &amp; Jatuh Tempo</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200">
+                          {reportStudents.map((s) => (
+                            <tr key={s.id}>
+                              <td className="py-2 pr-3">
+                                {s.childPhotoUrl ? (
+                                  <img
+                                    src={s.childPhotoUrl}
+                                    alt={s.childName}
+                                    className="w-10 h-10 rounded object-cover border border-slate-200"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <span className="text-[11px] text-slate-400">-</span>
+                                )}
+                              </td>
+                              <td className="py-2 pr-3">
+                                <span className="font-semibold">{s.childName}</span>
+                                {s.childGender && (
+                                  <span className="block text-[11px] text-slate-500">
+                                    {s.childGender}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-2 pr-3">{s.gradeLevel}</td>
+                              <td className="py-2 pr-3">
+                                <span>{s.packageName}</span>
+                                <span className="block text-[11px] text-slate-500">
+                                  {s.registrationChannel === 'offline' ? 'Offline Admin' : 'Online'}
+                                  {typeof s.billingAmount === 'number'
+                                    ? ` · ${formatRupiah(s.billingAmount)}`
+                                    : ''}
+                                </span>
+                              </td>
+                              <td className="py-2 pr-3">{s.branchName}</td>
+                              <td className="py-2 pr-3">{s.parentName} ({s.parentPhone})</td>
+                              <td className="py-2">
+                                <span className="font-semibold block">{getStatusLabel(s.status)}</span>
+                                {s.nextDueAtIso && (
+                                  <span className="text-[11px] text-slate-500">
+                                    JT: {formatJakartaDateTime(s.nextDueAtIso)}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )
+                  )}
+
+                  {/* 2. INVOICE / BILLING PDF */}
+                  {reportCategory === 'invoice' && (
+                    bundle.payments.length === 0 ? (
+                      <p className="text-sm text-slate-500 py-6 text-center">
+                        Belum ada data pembayaran untuk dicetak sebagai invoice PDF.
+                      </p>
+                    ) : selectedInvoice ? (
+                      <div className="space-y-6 text-sm">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 border border-slate-200 rounded-xl p-4">
+                          <div className="space-y-1">
+                            <p className="text-xs font-semibold text-slate-500 uppercase">Ditagihkan Kepada</p>
+                            <p className="font-bold text-slate-900">{selectedInvoice.childName}</p>
+                            <p className="text-xs text-slate-600">ID Siswa: {selectedInvoice.studentId}</p>
+                          </div>
+                          <div className="space-y-1 sm:text-right">
+                            <p className="text-xs font-semibold text-slate-500 uppercase">Detail Tagihan</p>
+                            <p className="font-mono font-bold text-slate-900">
+                              INV-{selectedInvoice.id.slice(0, 8).toUpperCase()}
+                            </p>
+                            <p className="text-xs text-slate-600">Periode: {selectedInvoice.periodLabel}</p>
+                          </div>
+                        </div>
+
+                        <table className="w-full text-left border-collapse text-sm">
+                          <thead>
+                            <tr className="border-b-2 border-slate-300 text-slate-700">
+                              <th className="py-2.5">Keterangan Tagihan</th>
+                              <th className="py-2.5">Metode</th>
+                              <th className="py-2.5">Status</th>
+                              <th className="py-2.5 text-right">Jumlah</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr className="border-b border-slate-200">
+                              <td className="py-3">
+                                Biaya Bimbingan Belajar — {selectedInvoice.periodLabel}
+                                {selectedInvoice.notes ? ` (${selectedInvoice.notes})` : ''}
+                              </td>
+                              <td className="py-3">{selectedInvoice.method}</td>
+                              <td className="py-3 font-bold uppercase">{selectedInvoice.status}</td>
+                              <td className="py-3 text-right font-mono font-bold tabular-nums">
+                                Rp {selectedInvoice.amount.toLocaleString('id-ID')}
+                              </td>
+                            </tr>
+                          </tbody>
+                          <tfoot>
+                            <tr>
+                              <td colSpan={3} className="pt-4 text-right font-bold text-slate-900">
+                                TOTAL PEMBAYARAN
+                              </td>
+                              <td className="pt-4 text-right text-lg font-extrabold font-mono text-rose-700 tabular-nums">
+                                Rp {selectedInvoice.amount.toLocaleString('id-ID')}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+
+                        <div className="pt-8 flex justify-end">
+                          <div className="text-center space-y-12 w-56">
+                            <p className="text-xs text-slate-600">Indramayu, {new Date().toLocaleDateString('id-ID')}<br />Pengelola TOMOYO Education</p>
+                            <p className="text-xs font-bold text-slate-900 border-t border-slate-400 pt-1">
+                              {BRAND_IDENTITY.founderName}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <table className="w-full text-left border-collapse text-xs sm:text-sm">
+                        <thead>
+                          <tr className="border-b border-slate-300 text-slate-700">
+                            <th className="py-2 pr-3">No. Invoice</th>
+                            <th className="py-2 pr-3">Nama Siswa</th>
+                            <th className="py-2 pr-3">Periode</th>
+                            <th className="py-2 pr-3">Metode</th>
+                            <th className="py-2 pr-3">Status</th>
+                            <th className="py-2 text-right">Nominal</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200">
+                          {bundle.payments.map((p) => (
+                            <tr key={p.id}>
+                              <td className="py-2 pr-3 font-mono text-xs">
+                                INV-{p.id.slice(0, 8).toUpperCase()}
+                              </td>
+                              <td className="py-2 pr-3 font-semibold">{p.childName}</td>
+                              <td className="py-2 pr-3">{p.periodLabel}</td>
+                              <td className="py-2 pr-3">{p.method}</td>
+                              <td className="py-2 pr-3 font-semibold uppercase">{p.status}</td>
+                              <td className="py-2 text-right font-mono tabular-nums">
+                                Rp {p.amount.toLocaleString('id-ID')}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t-2 border-slate-300 font-bold">
+                            <td colSpan={5} className="py-3 text-right">TOTAL TERCATAT</td>
+                            <td className="py-3 text-right font-mono tabular-nums">
+                              Rp {totalPaymentsAmount.toLocaleString('id-ID')}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    )
+                  )}
+
+                  {/* 3. TEACHERS PDF */}
+                  {reportCategory === 'teachers' && (
+                    <table className="w-full text-left border-collapse text-xs sm:text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-300 text-slate-700">
+                          <th className="py-2 pr-3">No.</th>
+                          <th className="py-2 pr-3">Nama Guru &amp; Gelar</th>
+                          <th className="py-2">Keterangan / Bidang</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {bundle.teachers.map((t, idx) => (
+                          <tr key={t.id}>
+                            <td className="py-2 pr-3 font-mono">{idx + 1}</td>
+                            <td className="py-2 pr-3 font-semibold">{t.name}</td>
+                            <td className="py-2 text-slate-600">{t.description || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+
+                  {/* 4. SCHEDULES PDF */}
+                  {reportCategory === 'schedules' && (
+                    bundle.schedules.length === 0 ? (
+                      <p className="text-sm text-slate-500 py-6 text-center">
+                        Belum ada jadwal belajar yang tersimpan di CMS.
+                      </p>
+                    ) : (
+                      <table className="w-full text-left border-collapse text-xs sm:text-sm">
+                        <thead>
+                          <tr className="border-b border-slate-300 text-slate-700">
+                            <th className="py-2 pr-3">Kelas / Sesi</th>
+                            <th className="py-2 pr-3">Hari &amp; Jam</th>
+                            <th className="py-2 pr-3">Paket</th>
+                            <th className="py-2 pr-3">Cabang</th>
+                            <th className="py-2">Catatan</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200">
+                          {bundle.schedules.map((sch) => (
+                            <tr key={sch.id}>
+                              <td className="py-2 pr-3 font-semibold">{sch.title}</td>
+                              <td className="py-2 pr-3">{sch.dayTime}</td>
+                              <td className="py-2 pr-3">{sch.packageId || '-'}</td>
+                              <td className="py-2 pr-3">{sch.branchId || '-'}</td>
+                              <td className="py-2 text-slate-600">{sch.notes || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )
+                  )}
+
+                  {/* 5. PACKAGES & PRICES PDF */}
+                  {reportCategory === 'packages' && (
+                    <table className="w-full text-left border-collapse text-xs sm:text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-300 text-slate-700">
+                          <th className="py-2 pr-3">Paket</th>
+                          <th className="py-2 pr-3">Program</th>
+                          <th className="py-2 pr-3">Harga Pusat (Indramayu Kota)</th>
+                          <th className="py-2">Harga Cabang (Terisi)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {bundle.packages.map((pkg) => {
+                          const pusat = getPackagePriceForBranch(pkg, 'indramayu-kota');
+                          const cabang = getPackagePriceForBranch(pkg, 'terisi');
+                          return (
+                            <tr key={pkg.id}>
+                              <td className="py-2 pr-3 font-semibold">{pkg.title}</td>
+                              <td className="py-2 pr-3">{pkg.programType}</td>
+                              <td className="py-2 pr-3 font-mono font-semibold">
+                                {pusat !== null ? formatRupiah(pusat) : 'Belum diatur'}
+                                {pkg.pricePusatNote ? ` (${pkg.pricePusatNote})` : ''}
+                              </td>
+                              <td className="py-2 font-mono font-semibold">
+                                {cabang !== null ? formatRupiah(cabang) : 'Belum diatur'}
+                                {pkg.priceCabangNote ? ` (${pkg.priceCabangNote})` : ''}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+
+                  {/* 6. BRANCHES & ANNOUNCEMENTS PDF */}
+                  {reportCategory === 'branches' && (
+                    <div className="space-y-6 text-xs sm:text-sm">
+                      <div>
+                        <h3 className="font-bold text-slate-900 mb-2">Daftar Cabang Resmi</h3>
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="border-b border-slate-300 text-slate-700">
+                              <th className="py-2 pr-3">Nama Cabang</th>
+                              <th className="py-2 pr-3">Status</th>
+                              <th className="py-2 pr-3">Koordinat</th>
+                              <th className="py-2">Google Maps</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200">
+                            {bundle.branches.map((b) => (
+                              <tr key={b.id}>
+                                <td className="py-2 pr-3 font-semibold">{b.name}</td>
+                                <td className="py-2 pr-3">{b.roleLabel}</td>
+                                <td className="py-2 pr-3 font-mono">
+                                  {b.latitude}, {b.longitude}
+                                </td>
+                                <td className="py-2 break-all text-slate-600">{b.mapsUrl}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div>
+                        <h3 className="font-bold text-slate-900 mb-2">Pengumuman Terbit</h3>
+                        {bundle.announcements.length === 0 ? (
+                          <p className="text-slate-500">Belum ada pengumuman terbit.</p>
+                        ) : (
+                          <ul className="space-y-2">
+                            {bundle.announcements.map((a) => (
+                              <li key={a.id} className="border border-slate-200 rounded-lg p-3">
+                                <p className="font-bold">{a.title} {a.dateLabel ? `(${a.dateLabel})` : ''}</p>
+                                <p className="text-slate-600 mt-0.5 whitespace-pre-line">{a.content}</p>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* WHATSAPP FONNTE TAB */}
+            {activeTab === 'whatsapp' && (
+              <div className="space-y-6">
+                <div className="ios-glass rounded-2xl p-6 space-y-4">
+                  <h2 className="text-base font-bold text-slate-900">
+                    Status Integrasi WhatsApp Fonnte
+                  </h2>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                    <div className="p-4 rounded-xl ios-glass-subtle">
+                      <p className="text-xs text-slate-500">Nomor Pengirim / Penerima Admin</p>
+                      <p className="font-mono font-bold text-slate-900 mt-1">
+                        {ADMIN_WHATSAPP_TARGET}
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl ios-glass-subtle">
+                      <p className="text-xs text-slate-500">Status Backend Secret (FONNTE_TOKEN)</p>
+                      <p
+                        className={`font-bold mt-1 ${
+                          serverAuthState.fonnteConfigured
+                            ? 'text-emerald-700'
+                            : 'text-amber-700'
+                        }`}
+                      >
+                        {serverAuthState.fonnteConfigured
+                          ? 'Terkonfigurasi di Server'
+                          : 'Belum Dikonfigurasi di Environment Backend'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {!serverAuthState.fonnteConfigured && (
+                    <div className="p-4 rounded-xl bg-amber-50/90 border border-amber-200 text-xs sm:text-sm text-amber-900 space-y-1.5">
+                      <p className="font-bold">Cara Mengaktifkan Secret FONNTE_TOKEN:</p>
+                      <p>
+                        1. Buka panel Secrets di Google AI Studio (atau Environment Variables pada dashboard Vercel).
+                      </p>
+                      <p>
+                        2. Tambahkan variabel bernama <code className="font-mono font-bold">FONNTE_TOKEN</code> berisi token device Fonnte Anda (jangan pernah menaruh token di kode frontend).
+                      </p>
+                      <p>3. Restart server / redeploy agar backend membaca variabel baru.</p>
+                    </div>
+                  )}
+
+                  <div className="pt-2 flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      disabled={waTesting}
+                      onClick={handleTestWhatsapp}
+                      className="px-5 py-2.5 min-h-[44px] text-sm font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-xl cursor-pointer disabled:opacity-60"
+                    >
+                      {waTesting
+                        ? 'Mengirim Uji WhatsApp...'
+                        : `Uji Kirim WhatsApp ke ${ADMIN_WHATSAPP_TARGET}`}
+                    </button>
+                  </div>
+
+                  {waTestResult && (
+                    <div
+                      role="status"
+                      className={`p-4 rounded-xl border text-sm ${
+                        waTestResult.status === 'sent'
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                          : 'bg-amber-50 border-amber-200 text-amber-900'
+                      }`}
+                    >
+                      <p className="font-bold uppercase text-xs mb-1">
+                        Status: {waTestResult.status}
+                      </p>
+                      <p>{waTestResult.detail}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* DUE-DATE MONITOR & ADMIN CONFIRMATION (FONNTE) */}
+                <div className="ios-glass rounded-2xl p-6 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                        <BellRing className="w-4 h-4 text-rose-700" />
+                        <span>Pemantauan &amp; Konfirmasi Jatuh Tempo Pembayaran (Fonnte)</span>
+                      </h3>
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        Setiap siswa otomatis dijadwalkan tepat 1 bulan dari tanggal &amp; jam pendaftaran. Saat jatuh tempo tiba, Fonnte mengirim notifikasi ke WhatsApp dan menunggu konfirmasi admin.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={dueSyncing || !bundle}
+                      onClick={() => bundle && syncDueRemindersWithServer(bundle.students)}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-800 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl cursor-pointer disabled:opacity-60 shrink-0"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${dueSyncing ? 'animate-spin' : ''}`} />
+                      <span>{dueSyncing ? 'Menyinkronkan...' : 'Sinkronkan & Cek Jatuh Tempo'}</span>
+                    </button>
+                  </div>
+
+                  {dueActionMsg && (
+                    <div
+                      role="status"
+                      className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs sm:text-sm text-emerald-950"
+                    >
+                      {dueActionMsg}
+                    </div>
+                  )}
+
+                  {dueMonitorStudents.length === 0 ? (
+                    <p className="text-sm text-slate-500 py-4 text-center">
+                      Belum ada siswa aktif/menunggu yang memiliki jadwal jatuh tempo bulanan.
+                    </p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs sm:text-sm">
+                        <thead>
+                          <tr className="border-b border-slate-200/80 text-slate-600">
+                            <th className="py-2.5 pr-3">Siswa &amp; Paket</th>
+                            <th className="py-2.5 pr-3">Terdaftar</th>
+                            <th className="py-2.5 pr-3">Jatuh Tempo Berikutnya</th>
+                            <th className="py-2.5 pr-3">Status Jatuh Tempo</th>
+                            <th className="py-2.5 text-right">Aksi Admin &amp; Fonnte</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200/70">
+                          {dueMonitorStudents.map((student) => {
+                            const dueNow = isPaymentDueNow(
+                              student.nextDueAtIso,
+                              student.dueConfirmedIso
+                            );
+                            return (
+                              <tr key={student.id}>
+                                <td className="py-3 pr-3">
+                                  <p className="font-bold text-slate-900">{student.childName}</p>
+                                  <p className="text-xs text-slate-500">
+                                    {student.packageName} · {student.branchName}
+                                  </p>
+                                  <p className="text-[11px] text-slate-500">
+                                    WA Ortu: {student.parentPhone}
+                                    {typeof student.billingAmount === 'number'
+                                      ? ` · ${formatRupiah(student.billingAmount)}`
+                                      : ''}
+                                  </p>
+                                </td>
+                                <td className="py-3 pr-3 text-xs text-slate-600">
+                                  {student.registeredAtIso
+                                    ? formatJakartaDateTime(student.registeredAtIso)
+                                    : '-'}
+                                </td>
+                                <td className="py-3 pr-3 text-xs font-mono font-semibold text-slate-900">
+                                  {student.nextDueAtIso
+                                    ? formatJakartaDateTime(student.nextDueAtIso)
+                                    : '-'}
+                                </td>
+                                <td className="py-3 pr-3">
+                                  <span
+                                    className={`inline-block px-2.5 py-1 text-[11px] font-bold rounded-full ${
+                                      dueNow
+                                        ? 'bg-rose-100 text-rose-800'
+                                        : 'bg-emerald-100 text-emerald-800'
+                                    }`}
+                                  >
+                                    {dueNow
+                                      ? 'JATUH TEMPO — PERLU KONFIRMASI ADMIN'
+                                      : 'Terjadwal'}
+                                  </span>
+                                  {student.lastDueNotifiedIso && (
+                                    <p className="text-[10px] text-slate-500 mt-1">
+                                      Notif terakhir: {formatJakartaDateTime(student.lastDueNotifiedIso)}
+                                    </p>
+                                  )}
+                                </td>
+                                <td className="py-3 text-right">
+                                  <div className="inline-flex flex-wrap justify-end gap-1.5">
+                                    <button
+                                      type="button"
+                                      disabled={actionBusy}
+                                      onClick={() => openConfirmDueModal(student)}
+                                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg cursor-pointer"
+                                    >
+                                      <CheckCircle2 className="w-3.5 h-3.5" />
+                                      <span>Konfirmasi (+1 Bulan)</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={actionBusy}
+                                      onClick={() => handleSendDueReminderNow(student, false)}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-800 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+                                    >
+                                      <Send className="w-3 h-3" />
+                                      <span>WA Admin</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={actionBusy}
+                                      onClick={() => handleSendDueReminderNow(student, true)}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-indigo-800 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 rounded-lg cursor-pointer"
+                                    >
+                                      <Send className="w-3 h-3" />
+                                      <span>WA Ortu</span>
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                <div className="ios-glass rounded-2xl p-6 space-y-3">
+                  <h3 className="text-base font-bold text-slate-900">
+                    Riwayat Log Notifikasi WhatsApp (Pendaftaran &amp; Jatuh Tempo)
+                  </h3>
+                  {!bundle?.notificationLogs.length ? (
+                    <p className="text-sm text-slate-500">
+                      Belum ada log pengiriman notifikasi.
+                    </p>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {bundle.notificationLogs.map((log) => (
+                        <div
+                          key={log.id}
+                          className="p-3.5 rounded-xl ios-glass-subtle text-xs space-y-1"
+                        >
+                          <div className="flex flex-wrap justify-between gap-2 font-bold text-slate-900">
+                            <span>
+                              Reg ID: {log.registrationId}
+                              {log.type ? ` · [${log.type}]` : ''}
+                            </span>
+                            <span className="uppercase">{log.status}</span>
+                          </div>
+                          <p className="text-slate-600">{log.providerDetail}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </main>
+
+      {/* Modal Detail & Edit Student with Child Photo Preview */}
+      {selectedStudent && bundle && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-xs flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Detail dan Edit Pendaftaran Siswa"
+        >
+          <div className="ios-glass-strong rounded-3xl max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-lg font-bold text-slate-900">Kelola Data Siswa</h2>
+            <div className="p-3.5 ios-glass-subtle rounded-2xl text-xs text-slate-700 space-y-0.5">
+              <p><strong>Orang Tua:</strong> {selectedStudent.parentName}</p>
+              <p><strong>Email Google:</strong> {selectedStudent.parentEmail || '-'}</p>
+              <p>
+                <strong>Jalur Daftar:</strong>{' '}
+                {selectedStudent.registrationChannel === 'offline' ? 'Offline (Input Admin)' : 'Online (Orang Tua)'}
+              </p>
+              {selectedStudent.nextDueAtIso && (
+                <p>
+                  <strong>Jatuh Tempo Berikutnya:</strong> {formatJakartaDateTime(selectedStudent.nextDueAtIso)}
+                </p>
+              )}
+              <p className="font-mono"><strong>Parent UID:</strong> {selectedStudent.parentId}</p>
+            </div>
+
+            {/* Child Photo Preview + Cloudinary Replace */}
+            <div className="p-4 rounded-2xl bg-white/80 border border-slate-200 space-y-3 text-center">
+              <p className="text-xs font-bold text-slate-700">Foto Siswa (Cloudinary)</p>
+              {selectedStudent.childPhotoUrl ? (
+                <div className="space-y-2">
+                  <img
+                    src={selectedStudent.childPhotoUrl}
+                    alt={`Foto ${selectedStudent.childName}`}
+                    className="max-h-60 w-auto mx-auto object-contain rounded-xl shadow-xs"
+                    referrerPolicy="no-referrer"
+                  />
+                  <a
+                    href={selectedStudent.childPhotoUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-rose-700 hover:underline"
+                  >
+                    <span>Buka Ukuran Penuh</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500 py-3">Belum ada foto siswa terunggah.</p>
+              )}
+              <div>
+                <label className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-slate-900 text-white rounded-xl cursor-pointer">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>{studentPhotoUploading ? 'Mengunggah...' : 'Ganti Foto Siswa'}</span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    onChange={(e) => handleAdminStudentPhotoUpload(e.target.files?.[0])}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveSelectedStudent} className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Nama Siswa</label>
+                  <input
+                    type="text"
+                    required
+                    value={selectedStudent.childName}
+                    onChange={(e) =>
+                      setSelectedStudent({ ...selectedStudent, childName: e.target.value })
+                    }
+                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Jenis Kelamin</label>
+                  <select
+                    value={selectedStudent.childGender || 'Laki-laki'}
+                    onChange={(e) =>
+                      setSelectedStudent({
+                        ...selectedStudent,
+                        childGender: e.target.value as ChildGender,
+                      })
+                    }
+                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                  >
+                    <option value="Laki-laki">Laki-laki</option>
+                    <option value="Perempuan">Perempuan</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Kelas</label>
+                  <input
+                    type="text"
+                    required
+                    value={selectedStudent.gradeLevel}
+                    onChange={(e) =>
+                      setSelectedStudent({ ...selectedStudent, gradeLevel: e.target.value })
+                    }
+                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Nominal Tagihan (Rp)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="Kosongkan jika belum diatur"
+                    value={selectedStudent.billingAmount ?? ''}
+                    onChange={(e) =>
+                      setSelectedStudent({
+                        ...selectedStudent,
+                        billingAmount: e.target.value === '' ? undefined : Number(e.target.value),
+                      })
+                    }
+                    className="w-full px-3 py-2 text-sm font-mono bg-white border border-slate-300 rounded-xl"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Status Pembayaran Awal</label>
+                  <select
+                    value={selectedStudent.initialPaymentStatus || 'belum_bayar'}
+                    onChange={(e) =>
+                      setSelectedStudent({
+                        ...selectedStudent,
+                        initialPaymentStatus: e.target.value as PaymentStatus,
+                      })
+                    }
+                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                  >
+                    <option value="belum_bayar">Belum Bayar</option>
+                    <option value="cicilan">Cicilan</option>
+                    <option value="lunas">Lunas</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Paket</label>
+                  <select
+                    value={selectedStudent.packageId}
+                    onChange={(e) =>
+                      setSelectedStudent({
+                        ...selectedStudent,
+                        packageId: e.target.value as PackageId,
+                      })
+                    }
+                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                  >
+                    {bundle.packages.map((p) => (
+                      <option key={p.id} value={p.slug}>
+                        {p.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Cabang</label>
+                  <select
+                    value={selectedStudent.branchId}
+                    onChange={(e) =>
+                      setSelectedStudent({
+                        ...selectedStudent,
+                        branchId: e.target.value as BranchId,
+                      })
+                    }
+                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                  >
+                    {bundle.branches.map((b) => (
+                      <option key={b.id} value={b.slug}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Status Persetujuan
+                  </label>
+                  <select
+                    value={selectedStudent.status}
+                    onChange={(e) =>
+                      setSelectedStudent({
+                        ...selectedStudent,
+                        status: e.target.value as RegistrationStatus,
+                      })
+                    }
+                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                  >
+                    <option value="pending">Menunggu Persetujuan</option>
+                    <option value="approved">Disetujui</option>
+                    <option value="rejected">Ditolak</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Status Akademik Siswa
+                  </label>
+                  <select
+                    value={selectedStudent.academicStatus}
+                    onChange={(e) =>
+                      setSelectedStudent({
+                        ...selectedStudent,
+                        academicStatus: e.target.value as AcademicStatus,
+                      })
+                    }
+                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                  >
+                    <option value="menunggu">Menunggu</option>
+                    <option value="aktif">Aktif</option>
+                    <option value="lulus">Lulus</option>
+                    <option value="nonaktif">Nonaktif</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Nomor HP Orang Tua
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={selectedStudent.parentPhone}
+                  onChange={(e) =>
+                    setSelectedStudent({ ...selectedStudent, parentPhone: e.target.value })
+                  }
+                  className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Catatan Admin untuk Orang Tua (Opsional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={selectedStudent.adminNotes || ''}
+                  onChange={(e) =>
+                    setSelectedStudent({ ...selectedStudent, adminNotes: e.target.value })
+                  }
+                  className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setSelectedStudent(null)}
+                  className="px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionBusy || studentPhotoUploading}
+                  className="px-4 py-2 text-sm font-semibold text-white bg-slate-900 rounded-xl cursor-pointer"
+                >
+                  {actionBusy ? 'Menyimpan...' : 'Simpan Perubahan'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Confirm Monthly Due Payment */}
+      {confirmDueStudent && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-xs flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Konfirmasi Pembayaran Jatuh Tempo"
+        >
+          <form
+            onSubmit={handleConfirmDueSubmit}
+            className="ios-glass-strong rounded-3xl max-w-md w-full p-6 space-y-4"
+          >
+            <div className="flex items-center gap-2.5 text-emerald-800">
+              <CheckCircle2 className="w-5 h-5 shrink-0" />
+              <h2 className="text-lg font-bold">Konfirmasi Jatuh Tempo Pembayaran</h2>
+            </div>
+            <div className="p-3.5 ios-glass-subtle rounded-2xl text-xs text-slate-700 space-y-1">
+              <p><strong>Siswa:</strong> {confirmDueStudent.childName}</p>
+              <p><strong>Orang Tua:</strong> {confirmDueStudent.parentName} ({confirmDueStudent.parentPhone})</p>
+              <p><strong>Paket / Cabang:</strong> {confirmDueStudent.packageName} — {confirmDueStudent.branchName}</p>
+              {confirmDueStudent.nextDueAtIso && (
+                <p><strong>Jatuh Tempo Saat Ini:</strong> {formatJakartaDateTime(confirmDueStudent.nextDueAtIso)}</p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Nominal Dibayar (Rp)</label>
+                <input
+                  type="number"
+                  min="0"
+                  required
+                  value={confirmDueAmount}
+                  onChange={(e) => setConfirmDueAmount(e.target.value)}
+                  className="w-full px-3 py-2 text-sm font-mono bg-white border border-slate-300 rounded-xl"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Status Pembayaran</label>
+                <select
+                  value={confirmDueStatus}
+                  onChange={(e) => setConfirmDueStatus(e.target.value as PaymentStatus)}
+                  className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                >
+                  <option value="lunas">Lunas</option>
+                  <option value="cicilan">Cicilan</option>
+                  <option value="belum_bayar">Belum Bayar</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Metode</label>
+                <input
+                  type="text"
+                  required
+                  value={confirmDueMethod}
+                  onChange={(e) => setConfirmDueMethod(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Periode Tagihan</label>
+                <input
+                  type="text"
+                  required
+                  value={confirmDuePeriod}
+                  onChange={(e) => setConfirmDuePeriod(e.target.value)}
+                  className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Catatan</label>
+              <input
+                type="text"
+                value={confirmDueNotes}
+                onChange={(e) => setConfirmDueNotes(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDueStudent(null)}
+                className="px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={actionBusy}
+                className="px-4 py-2 text-sm font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-xl cursor-pointer disabled:opacity-60"
+              >
+                {actionBusy ? 'Menyimpan...' : 'Konfirmasi & Perpanjang +1 Bulan'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Modal Safe Delete Confirmation */}
+      {confirmDeleteStudent && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-xs flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Konfirmasi Hapus Data Siswa"
+        >
+          <div className="ios-glass-strong border-rose-200 rounded-3xl max-w-md w-full p-6 space-y-4">
+            <h2 className="text-lg font-bold text-rose-800">Konfirmasi Penghapusan Siswa</h2>
+            <p className="text-sm text-slate-700 leading-relaxed">
+              Anda akan menghapus data pendaftaran siswa{' '}
+              <strong>{confirmDeleteStudent.childName}</strong> (Orang tua:{' '}
+              {confirmDeleteStudent.parentName}).
+            </p>
+            <p className="text-xs text-slate-600 ios-glass-subtle rounded-xl p-3">
+              Penghapusan ini hanya menghapus dokumen siswa tersebut. Akun Google orang tua dan data anak lain yang terdaftar tidak akan dihapus.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteStudent(null)}
+                className="px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-100 rounded-xl cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={actionBusy}
+                onClick={handleConfirmDeleteStudent}
+                className="px-4 py-2 text-sm font-semibold text-white bg-rose-700 hover:bg-rose-800 rounded-xl cursor-pointer"
+              >
+                {actionBusy ? 'Menghapus...' : 'Ya, Hapus Siswa'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
