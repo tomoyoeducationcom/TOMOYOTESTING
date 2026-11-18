@@ -478,7 +478,7 @@ async function startServer() {
       }
     });
   } else {
-    const distDir = path.resolve(__dirname, 'dist');
+    const distDir = path.resolve(process.cwd(), 'dist');
     app.use(express.static(distDir, { index: false }));
     app.use('*', (req, res, next) => {
       if (req.originalUrl.startsWith('/api/')) {
