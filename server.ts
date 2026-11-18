@@ -18,7 +18,11 @@ import {
   generateSitemapXml,
   injectSeoIntoHtml,
 } from './src/lib/seo';
-import { isDecodedTokenAdmin, verifyRequestFirebaseToken } from './src/server/auth';
+import {
+  isDecodedTokenAdmin,
+  verifyRequestFirebaseToken,
+  verifyRequestFirebaseTokenDetailed,
+} from './src/server/auth';
 import {
   confirmDueReminder,
   isFonnteConfigured,
@@ -60,11 +64,11 @@ export function createApp() {
   });
 
   app.get('/api/admin/verify', async (req, res) => {
-    const decoded = await verifyRequestFirebaseToken(req);
+    const { decoded, reason } = await verifyRequestFirebaseTokenDetailed(req);
     if (!decoded) {
       res.status(401).json({
         authorized: false,
-        error: 'Token Firebase tidak valid atau belum login.',
+        error: reason || 'Token Firebase tidak valid atau belum login.',
       });
       return;
     }
