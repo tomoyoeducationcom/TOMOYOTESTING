@@ -1,13 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  AlertCircle,
   BellRing,
   BookOpen,
   CalendarClock,
   Check,
   CheckCircle2,
+  Columns2,
   CreditCard,
   ExternalLink,
   FileText,
+  FolderInput,
   LayoutDashboard,
   LogOut,
   MessageSquare,
@@ -23,6 +26,8 @@ import {
   User,
   UserPlus,
   Users,
+  Wifi,
+  WifiOff,
   X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -37,13 +42,17 @@ import {
   ChildGender,
   FONNTE_SENDER_DISPLAY,
   FONNTE_SENDER_NUMBER,
+  LegacyStudentMigrationDraft,
   OfflineRegistrationDraft,
   PackageId,
   PaymentRecord,
   PaymentStatus,
+  RegistrationChannel,
   RegistrationStatus,
   StudentRecord,
   computeNextMonthlyDueDate,
+  filterAndSplitStudentsByBranch,
+  formatIndonesianDate,
   formatJakartaDateTime,
   formatRupiah,
   getAcademicStatusLabel,
@@ -51,11 +60,15 @@ import {
   getPaymentStatusLabel,
   getStatusLabel,
   isPaymentDueNow,
+  parseStudentArchiveMeta,
+  serializeArchiveMetaNotes,
+  validateLegacyMigrationDraft,
   validateOfflineRegistrationDraft,
 } from '../lib/domain';
 import { uploadImageToCloudinary } from '../lib/cloudinary';
 import {
   adminConfirmStudentDuePayment,
+  adminCreateMigratedStudent,
   adminCreateNotificationLog,
   adminCreateOfflineStudent,
   adminCreatePayment,
@@ -76,6 +89,7 @@ type AdminTab =
   | 'overview'
   | 'students'
   | 'offline'
+  | 'migration'
   | 'quizzes'
   | 'wagroup'
   | 'wacenter'
@@ -90,6 +104,18 @@ type ReportCategory =
   | 'schedules'
   | 'packages'
   | 'branches';
+
+interface FonnteDeviceStatusInfo {
+  configured: boolean;
+  connected: boolean;
+  senderNumber: string;
+  deviceNumber?: string;
+  deviceName?: string;
+  deviceStatus?: string;
+  quota?: string;
+  tokenLength?: number;
+  detail: string;
+}
 
 function toLocalDateTimeInputValue(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -116,6 +142,34 @@ function createInitialOfflineDraft(): OfflineRegistrationDraft {
   };
 }
 
+function createInitialMigrationDraft(
+  branchId: BranchId = 'indramayu-kota',
+  packageId: PackageId = 'paket-1'
+): LegacyStudentMigrationDraft {
+  return {
+    parentName: '',
+    parentPhone: '',
+    childName: '',
+    birthDate: '',
+    childPhotoUrl: '',
+    childGender: 'Laki-laki',
+    gradeLevel: '',
+    schoolOrigin: '',
+    studentAddress: '',
+    packageId,
+    branchId,
+    registeredAtLocal: toLocalDateTimeInputValue(new Date()),
+    nextDueAtLocal: '',
+    billingAmount: '',
+    initialPaymentStatus: 'lunas',
+    paymentMethod: 'Tunai',
+    paymentPeriodLabel: '',
+    academicStatus: 'aktif',
+    notes: '',
+    notifyWhatsappOnSave: false,
+  };
+}
+
 export function AdminDashboardPage() {
   const { user, loading: authLoading, authError, unauthorizedDomain, logout } = useAuth();
   const { refresh: refreshPublicSite } = useSiteData();
@@ -135,6 +189,9 @@ export function AdminDashboardPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | RegistrationStatus>('all');
   const [branchFilter, setBranchFilter] = useState<'all' | BranchId>('all');
+  const [packageFilter, setPackageFilter] = useState<'all' | PackageId>('all');
+  const [channelFilter, setChannelFilter] = useState<'all' | RegistrationChannel>('all');
+  const [splitByBranch, setSplitByBranch] = useState(true);
   const [selectedStudent, setSelectedStudent] = useState<StudentRecord | null>(null);
   const [confirmDeleteStudent, setConfirmDeleteStudent] = useState<StudentRecord | null>(null);
   const [studentPhotoUploading, setStudentPhotoUploading] = useState(false);
@@ -147,6 +204,17 @@ export function AdminDashboardPage() {
   const [offlinePhotoUploading, setOfflinePhotoUploading] = useState(false);
   const [offlineErrors, setOfflineErrors] = useState<string[]>([]);
   const [offlineBanner, setOfflineBanner] = useState<{
+    type: 'success' | 'warning';
+    text: string;
+  } | null>(null);
+
+  // Legacy archive student migration state
+  const [migrationDraft, setMigrationDraft] = useState<LegacyStudentMigrationDraft>(
+    () => createInitialMigrationDraft()
+  );
+  const [migrationPhotoUploading, setMigrationPhotoUploading] = useState(false);
+  const [migrationErrors, setMigrationErrors] = useState<string[]>([]);
+  const [migrationBanner, setMigrationBanner] = useState<{
     type: 'success' | 'warning';
     text: string;
   } | null>(null);
@@ -177,12 +245,14 @@ export function AdminDashboardPage() {
   const [reportStatus, setReportStatus] = useState<'all' | RegistrationStatus>('all');
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>('all');
 
-  // WhatsApp test state
+  // WhatsApp test & device diagnostic state
   const [waTestResult, setWaTestResult] = useState<{
     status: string;
     detail: string;
   } | null>(null);
   const [waTesting, setWaTesting] = useState(false);
+  const [fonnteDevice, setFonnteDevice] = useState<FonnteDeviceStatusInfo | null>(null);
+  const [checkingDevice, setCheckingDevice] = useState(false);
 
   const syncDueRemindersWithServer = useCallback(
     async (students: StudentRecord[]) => {
@@ -324,21 +394,55 @@ export function AdminDashboardPage() {
     };
   }, [user, authLoading, loadAdminData]);
 
-  const filteredStudents = useMemo(() => {
-    if (!bundle) return [];
-    const q = searchQuery.trim().toLowerCase();
-    return bundle.students.filter((s) => {
-      if (statusFilter !== 'all' && s.status !== statusFilter) return false;
-      if (branchFilter !== 'all' && s.branchId !== branchFilter) return false;
-      if (!q) return true;
-      return (
-        s.childName.toLowerCase().includes(q) ||
-        s.parentName.toLowerCase().includes(q) ||
-        s.parentEmail.toLowerCase().includes(q) ||
-        s.parentPhone.toLowerCase().includes(q)
-      );
+  const checkFonnteDevice = useCallback(async () => {
+    if (!user) return;
+    setCheckingDevice(true);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch('/api/admin/fonnte/device', {
+        headers: { 'X-Firebase-Token': token },
+      });
+      if (res.ok) {
+        const json = (await res.json()) as FonnteDeviceStatusInfo;
+        setFonnteDevice(json);
+      } else {
+        setFonnteDevice({
+          configured: serverAuthState.fonnteConfigured,
+          connected: false,
+          senderNumber: FONNTE_SENDER_NUMBER,
+          detail: `Gagal memeriksa device Fonnte (HTTP ${res.status}).`,
+        });
+      }
+    } catch (err) {
+      setFonnteDevice({
+        configured: serverAuthState.fonnteConfigured,
+        connected: false,
+        senderNumber: FONNTE_SENDER_NUMBER,
+        detail: err instanceof Error ? err.message : 'Koneksi ke endpoint device gagal.',
+      });
+    } finally {
+      setCheckingDevice(false);
+    }
+  }, [user, serverAuthState.fonnteConfigured]);
+
+  useEffect(() => {
+    if (activeTab === 'whatsapp' && serverAuthState.authorized) {
+      void checkFonnteDevice();
+    }
+  }, [activeTab, serverAuthState.authorized, checkFonnteDevice]);
+
+  const splitFilteredStudents = useMemo(() => {
+    if (!bundle) return { filtered: [], pusat: [], cabang: [] };
+    return filterAndSplitStudentsByBranch(bundle.students, {
+      searchQuery,
+      branchFilter,
+      statusFilter,
+      packageFilter,
+      channelFilter,
     });
-  }, [bundle, searchQuery, statusFilter, branchFilter]);
+  }, [bundle, searchQuery, branchFilter, statusFilter, packageFilter, channelFilter]);
+
+  const filteredStudents = splitFilteredStudents.filtered;
 
   const reportStudents = useMemo(() => {
     if (!bundle) return [];
@@ -381,6 +485,16 @@ export function AdminDashboardPage() {
       setOfflineDraft((prev) => ({ ...prev, billingAmount: price }));
     }
   }, [bundle, offlineDraft.packageId, offlineDraft.branchId]);
+
+  // Sync migration draft billingAmount when package or branch changes (if admin has set a price)
+  useEffect(() => {
+    if (!bundle) return;
+    const pkg = bundle.packages.find((p) => p.slug === migrationDraft.packageId);
+    const price = getPackagePriceForBranch(pkg, migrationDraft.branchId);
+    if (price !== null) {
+      setMigrationDraft((prev) => ({ ...prev, billingAmount: price }));
+    }
+  }, [bundle, migrationDraft.packageId, migrationDraft.branchId]);
 
   if (authLoading || serverAuthState.checking) {
     return (
@@ -489,11 +603,28 @@ export function AdminDashboardPage() {
     if (!selectedStudent || !bundle) return;
     const pkg = bundle.packages.find((p) => p.slug === selectedStudent.packageId);
     const branch = bundle.branches.find((b) => b.slug === selectedStudent.branchId);
+    const parsedMeta = parseStudentArchiveMeta(selectedStudent);
+    const updatedNotes =
+      parsedMeta.isMigration ||
+      selectedStudent.birthDate ||
+      selectedStudent.schoolOrigin ||
+      selectedStudent.studentAddress
+        ? serializeArchiveMetaNotes({
+            birthDate: selectedStudent.birthDate ?? parsedMeta.birthDate,
+            schoolOrigin: selectedStudent.schoolOrigin ?? parsedMeta.schoolOrigin,
+            studentAddress: selectedStudent.studentAddress ?? parsedMeta.studentAddress,
+            userNotes: selectedStudent.notes ?? parsedMeta.cleanNotes,
+            isArchive: parsedMeta.isMigration,
+          })
+        : selectedStudent.notes;
 
     setActionBusy(true);
     try {
       await adminUpdateStudent(selectedStudent.id, {
         childName: selectedStudent.childName,
+        birthDate: selectedStudent.birthDate,
+        schoolOrigin: selectedStudent.schoolOrigin,
+        studentAddress: selectedStudent.studentAddress,
         childPhotoUrl: selectedStudent.childPhotoUrl,
         childGender: selectedStudent.childGender,
         gradeLevel: selectedStudent.gradeLevel,
@@ -503,13 +634,88 @@ export function AdminDashboardPage() {
         branchName: branch ? branch.name : selectedStudent.branchName,
         billingAmount: selectedStudent.billingAmount,
         initialPaymentStatus: selectedStudent.initialPaymentStatus,
+        registeredAtIso: selectedStudent.registeredAtIso,
+        nextDueAtIso: selectedStudent.nextDueAtIso,
         status: selectedStudent.status,
         academicStatus: selectedStudent.academicStatus,
+        parentName: selectedStudent.parentName,
         parentPhone: selectedStudent.parentPhone,
+        notes: updatedNotes,
         adminNotes: selectedStudent.adminNotes || '',
       });
       setSelectedStudent(null);
       await loadAdminData();
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleMigrationPhotoUpload = async (file: File | undefined) => {
+    if (!file) return;
+    setMigrationPhotoUploading(true);
+    try {
+      const res = await uploadImageToCloudinary(file);
+      setMigrationDraft((prev) => ({ ...prev, childPhotoUrl: res.secureUrl }));
+    } catch (err) {
+      setMigrationErrors([
+        err instanceof Error ? err.message : 'Gagal mengunggah foto siswa ke Cloudinary.',
+      ]);
+    } finally {
+      setMigrationPhotoUploading(false);
+    }
+  };
+
+  const handleCreateMigratedStudent = async (afterAction: 'next' | 'list') => {
+    if (!bundle || !user) return;
+    setMigrationErrors([]);
+    setMigrationBanner(null);
+
+    const check = validateLegacyMigrationDraft(migrationDraft);
+    if (!check.valid) {
+      setMigrationErrors(check.errors);
+      return;
+    }
+
+    setActionBusy(true);
+    try {
+      const token = await user.getIdToken();
+      const savedName = migrationDraft.childName.trim();
+      const savedBranch = migrationDraft.branchId;
+      const savedPkg = migrationDraft.packageId;
+      const branchLabel =
+        savedBranch === 'indramayu-kota' ? 'Indramayu Kota (Pusat)' : 'Kecamatan Terisi (Cabang)';
+
+      const res = await adminCreateMigratedStudent({
+        draft: migrationDraft,
+        packages: bundle.packages,
+        branches: bundle.branches,
+        adminUid: user.uid,
+        idToken: token,
+      });
+
+      const waNote =
+        migrationDraft.notifyWhatsappOnSave && res.waStatus
+          ? ` Status WA: ${res.waStatus.toUpperCase()}${res.waDetail ? ` (${res.waDetail})` : ''}.`
+          : '';
+
+      setMigrationBanner({
+        type: 'success',
+        text: `Data arsip siswa "${savedName}" berhasil dipindahkan ke ${branchLabel} & buku pembayaran. Jatuh tempo berikutnya: ${formatJakartaDateTime(
+          res.nextDueAtIso
+        )}.${waNote}`,
+      });
+
+      await loadAdminData();
+      if (afterAction === 'list') {
+        setBranchFilter(savedBranch);
+        setActiveTab('students');
+      } else {
+        setMigrationDraft(createInitialMigrationDraft(savedBranch, savedPkg));
+      }
+    } catch (err) {
+      setMigrationErrors([
+        err instanceof Error ? err.message : 'Gagal menyimpan data pindahan siswa.',
+      ]);
     } finally {
       setActionBusy(false);
     }
@@ -794,7 +1000,7 @@ export function AdminDashboardPage() {
   return (
     <div className="min-h-screen flex flex-col lg:flex-row">
       {/* Sidebar */}
-      <aside className="lg:w-64 bg-[#121820] text-slate-200 border-b lg:border-b-0 lg:border-r border-slate-800 shrink-0 no-print">
+      <aside className="lg:w-64 bg-[#141A23] text-slate-200 border-b lg:border-b-0 lg:border-r border-slate-800 shrink-0 no-print">
         <div className="p-5 border-b border-slate-800 flex items-center gap-3">
           <img
             src={BRAND_IDENTITY.emblemLogoPath}
@@ -813,6 +1019,7 @@ export function AdminDashboardPage() {
             { id: 'overview', label: 'Ringkasan', icon: LayoutDashboard },
             { id: 'students', label: 'Siswa & Pendaftaran', icon: Users },
             { id: 'offline', label: 'Pendaftaran Offline', icon: UserPlus },
+            { id: 'migration', label: 'Pindah Data Murid', icon: FolderInput },
             { id: 'quizzes', label: 'Kuis Online', icon: BookOpen },
             { id: 'wagroup', label: 'WhatsApp Group', icon: Users },
             { id: 'wacenter', label: 'WhatsApp Center', icon: Radio },
@@ -830,7 +1037,7 @@ export function AdminDashboardPage() {
                 onClick={() => setActiveTab(item.id as AdminTab)}
                 className={`flex items-center justify-between gap-2 px-3.5 py-2.5 min-h-[42px] rounded-xl text-sm font-medium transition-colors whitespace-nowrap cursor-pointer ${
                   active
-                    ? 'bg-[#BE123C] text-white font-semibold'
+                    ? 'bg-[#A61B38] text-white font-semibold'
                     : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                 }`}
               >
@@ -840,8 +1047,8 @@ export function AdminDashboardPage() {
                 </span>
                 {typeof item.badge === 'number' && item.badge > 0 && (
                   <span
-                    className={`px-2 py-0.5 text-[11px] font-mono font-bold rounded-lg tabular-nums ${
-                      active ? 'bg-white text-[#BE123C]' : 'bg-[#BE123C] text-white'
+                    className={`px-2 py-0.5 text-[11px] font-mono font-bold rounded-md tabular-nums ${
+                      active ? 'bg-white text-[#A61B38]' : 'bg-[#A61B38] text-white'
                     }`}
                   >
                     {item.badge}
@@ -866,12 +1073,13 @@ export function AdminDashboardPage() {
 
       {/* Main Viewport */}
       <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-6xl w-full space-y-6">
-        <div className="flex items-center justify-between gap-4 border-b border-[#DFDCD3] pb-4 no-print">
+        <div className="flex items-center justify-between gap-4 border-b border-[#E5E2D9] pb-4 no-print">
           <div>
-            <h1 className="font-display text-2xl sm:text-3xl font-bold text-[#121820]">
+            <h1 className="font-display text-2xl sm:text-3xl font-bold text-[#141A23]">
               {activeTab === 'overview' && 'Ringkasan Lembaga'}
               {activeTab === 'students' && 'Manajemen Siswa & Pendaftaran'}
               {activeTab === 'offline' && 'Pendaftaran Siswa Offline (Input Admin)'}
+              {activeTab === 'migration' && 'Pindah Data Murid Lama (Arsip Berkas)'}
               {activeTab === 'quizzes' && 'Manajemen Kuis Online Siswa'}
               {activeTab === 'wagroup' && 'WhatsApp Group Resmi (Fonnte)'}
               {activeTab === 'wacenter' && 'WhatsApp Center & Siaran Pesan'}
@@ -980,14 +1188,22 @@ export function AdminDashboardPage() {
                         Belum ada catatan pembayaran yang dimasukkan.
                       </p>
                     )}
-                    <div className="pt-2">
+                    <div className="pt-2 flex flex-wrap gap-2">
                       <button
                         type="button"
                         onClick={() => setActiveTab('offline')}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-rose-700 rounded-xl cursor-pointer"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#141A23] hover:bg-[#A61B38] rounded-xl cursor-pointer"
                       >
                         <UserPlus className="w-3.5 h-3.5" />
-                        <span>Input Pendaftaran Offline Baru</span>
+                        <span>Input Pendaftaran Offline</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('migration')}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#141A23] bg-white border border-[#E5E2D9] hover:border-[#A61B38] hover:text-[#A61B38] rounded-xl cursor-pointer"
+                      >
+                        <FolderInput className="w-3.5 h-3.5" />
+                        <span>Pindah Data Murid (Arsip)</span>
                       </button>
                     </div>
                   </div>
@@ -995,199 +1211,394 @@ export function AdminDashboardPage() {
               </div>
             )}
 
-            {/* STUDENTS TAB WITH PHOTO THUMBNAIL */}
-            {activeTab === 'students' && (
-              <div className="space-y-4">
-                <div className="ios-glass rounded-2xl p-4 flex flex-col sm:flex-row gap-3">
-                  <div className="relative flex-1">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      placeholder="Cari nama siswa, orang tua, email, atau HP..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 min-h-[42px] text-sm bg-white/85 border border-slate-300/80 rounded-xl"
-                    />
-                  </div>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
-                    className="px-3 py-2 min-h-[42px] text-sm bg-white/85 border border-slate-300/80 rounded-xl"
-                  >
-                    <option value="all">Semua Status</option>
-                    <option value="pending">Menunggu Persetujuan</option>
-                    <option value="approved">Disetujui</option>
-                    <option value="rejected">Ditolak</option>
-                  </select>
-                  <select
-                    value={branchFilter}
-                    onChange={(e) => setBranchFilter(e.target.value as typeof branchFilter)}
-                    className="px-3 py-2 min-h-[42px] text-sm bg-white/85 border border-slate-300/80 rounded-xl"
-                  >
-                    <option value="all">Semua Cabang</option>
-                    <option value="indramayu-kota">Indramayu Kota</option>
-                    <option value="terisi">Kecamatan Terisi</option>
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('offline')}
-                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 min-h-[42px] text-xs font-bold text-white bg-slate-900 hover:bg-rose-700 rounded-xl whitespace-nowrap cursor-pointer"
-                  >
-                    <UserPlus className="w-4 h-4" />
-                    <span>+ Pendaftaran Offline</span>
-                  </button>
-                </div>
+            {/* STUDENTS TAB — PUSAT VS CABANG SEPARATION & ARCHIVE METADATA */}
+            {activeTab === 'students' && (() => {
+              const renderStudentTable = (
+                list: StudentRecord[],
+                heading?: { title: string; badge: string; tone: 'pusat' | 'cabang' }
+              ) => (
+                <div className="ios-glass rounded-xl overflow-hidden border border-[#E5E2D9]">
+                  {heading && (
+                    <div
+                      className={`px-4 py-3 border-b border-[#E5E2D9] flex items-center justify-between gap-3 ${
+                        heading.tone === 'pusat' ? 'bg-[#F8F6F0]' : 'bg-[#F2F6F5]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span
+                          className={`px-2 py-0.5 text-[11px] font-mono font-bold uppercase rounded ${
+                            heading.tone === 'pusat'
+                              ? 'bg-[#A61B38] text-white'
+                              : 'bg-[#0F6E66] text-white'
+                          }`}
+                        >
+                          {heading.badge}
+                        </span>
+                        <h2 className="text-sm font-bold text-[#141A23]">{heading.title}</h2>
+                      </div>
+                      <span className="text-xs font-mono font-semibold text-[#5E6774] tabular-nums">
+                        {list.length} murid
+                      </span>
+                    </div>
+                  )}
 
-                {filteredStudents.length === 0 ? (
-                  <div className="ios-glass rounded-2xl p-10 text-center text-sm text-slate-600">
-                    Belum ada data pendaftaran yang sesuai dengan filter.
-                  </div>
-                ) : (
-                  <div className="ios-glass rounded-2xl overflow-x-auto">
-                    <table className="w-full text-left border-collapse text-sm">
-                      <thead>
-                        <tr className="border-b border-slate-200/80 bg-white/60 text-xs text-slate-600">
-                          <th className="py-3 px-4 font-semibold">Foto &amp; Siswa</th>
-                          <th className="py-3 px-4 font-semibold">Orang Tua</th>
-                          <th className="py-3 px-4 font-semibold">Paket, Cabang &amp; Tarif</th>
-                          <th className="py-3 px-4 font-semibold">Status &amp; Jatuh Tempo</th>
-                          <th className="py-3 px-4 font-semibold text-right">Aksi</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-200/70">
-                        {filteredStudents.map((student) => {
-                          const isDue =
-                            student.status !== 'rejected' &&
-                            isPaymentDueNow(student.nextDueAtIso, student.dueConfirmedIso);
-                          return (
-                            <tr key={student.id} className="hover:bg-white/50 transition-colors">
-                              <td className="py-3 px-4">
-                                <div className="flex items-center gap-3">
-                                  {student.childPhotoUrl ? (
-                                    <img
-                                      src={student.childPhotoUrl}
-                                      alt={`Foto ${student.childName}`}
-                                      className="w-11 h-11 rounded-xl object-cover border border-white shadow-xs shrink-0"
-                                      referrerPolicy="no-referrer"
-                                    />
-                                  ) : (
-                                    <div className="w-11 h-11 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
-                                      <User className="w-5 h-5 text-slate-400" />
+                  {list.length === 0 ? (
+                    <div className="p-8 text-center text-xs sm:text-sm text-[#5E6774]">
+                      Belum ada siswa pada kategori ini sesuai filter saat ini.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-sm">
+                        <thead>
+                          <tr className="border-b border-[#E5E2D9] bg-white/75 text-xs text-[#3E4856]">
+                            <th className="py-3 px-4 font-semibold">Foto &amp; Identitas Siswa</th>
+                            <th className="py-3 px-4 font-semibold">Orang Tua &amp; Kontak</th>
+                            <th className="py-3 px-4 font-semibold">Program, Masuk &amp; Tagihan</th>
+                            <th className="py-3 px-4 font-semibold">Status &amp; Jatuh Tempo</th>
+                            <th className="py-3 px-4 font-semibold text-right">Aksi</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#E5E2D9]/80">
+                          {list.map((student) => {
+                            const meta = parseStudentArchiveMeta(student);
+                            const isDue =
+                              student.status !== 'rejected' &&
+                              isPaymentDueNow(student.nextDueAtIso, student.dueConfirmedIso);
+                            const channelLabel = meta.isMigration
+                              ? 'Arsip Berkas'
+                              : student.registrationChannel === 'offline'
+                              ? 'Offline Admin'
+                              : 'Online Ortu';
+                            const channelClass = meta.isMigration
+                              ? 'bg-amber-100 text-amber-900'
+                              : student.registrationChannel === 'offline'
+                              ? 'bg-indigo-100 text-indigo-800'
+                              : 'bg-sky-100 text-sky-800';
+
+                            return (
+                              <tr key={student.id} className="hover:bg-white/60 transition-colors">
+                                <td className="py-3 px-4 align-top">
+                                  <div className="flex items-start gap-3">
+                                    {student.childPhotoUrl ? (
+                                      <img
+                                        src={student.childPhotoUrl}
+                                        alt={`Foto ${student.childName}`}
+                                        className="w-11 h-11 rounded-lg object-cover border border-[#E5E2D9] shrink-0"
+                                        referrerPolicy="no-referrer"
+                                      />
+                                    ) : (
+                                      <div className="w-11 h-11 rounded-lg bg-[#F2EFE9] border border-[#E5E2D9] flex items-center justify-center shrink-0">
+                                        <User className="w-5 h-5 text-slate-400" />
+                                      </div>
+                                    )}
+                                    <div className="space-y-0.5 min-w-0">
+                                      <p className="font-bold text-[#141A23]">{student.childName}</p>
+                                      <p className="text-xs text-[#3E4856]">
+                                        {student.gradeLevel}
+                                        {student.childGender ? ` · ${student.childGender}` : ''}
+                                      </p>
+                                      {meta.birthDate && (
+                                        <p className="text-[11px] text-[#5E6774]">
+                                          Lahir: {formatIndonesianDate(meta.birthDate)}
+                                        </p>
+                                      )}
+                                      {meta.schoolOrigin && (
+                                        <p className="text-[11px] text-[#5E6774]">
+                                          Sekolah: {meta.schoolOrigin}
+                                        </p>
+                                      )}
+                                      {meta.studentAddress && (
+                                        <p className="text-[11px] text-[#5E6774] line-clamp-1">
+                                          Alamat: {meta.studentAddress}
+                                        </p>
+                                      )}
+                                      <span
+                                        className={`inline-block mt-1 px-2 py-0.5 text-[10px] font-bold uppercase rounded ${channelClass}`}
+                                      >
+                                        {channelLabel}
+                                      </span>
                                     </div>
-                                  )}
-                                  <div>
-                                    <p className="font-bold text-slate-900">{student.childName}</p>
-                                    <p className="text-xs text-slate-500">
-                                      {student.gradeLevel}
-                                      {student.childGender ? ` · ${student.childGender}` : ''}
-                                    </p>
-                                    <span
-                                      className={`inline-block mt-0.5 px-2 py-0.5 text-[10px] font-bold uppercase rounded-md ${
-                                        student.registrationChannel === 'offline'
-                                          ? 'bg-indigo-100 text-indigo-800'
-                                          : 'bg-sky-100 text-sky-800'
-                                      }`}
-                                    >
-                                      {student.registrationChannel === 'offline' ? 'Offline Admin' : 'Online Ortu'}
-                                    </span>
                                   </div>
-                                </div>
-                              </td>
-                              <td className="py-3 px-4">
-                                <p className="font-medium text-slate-900">{student.parentName}</p>
-                                <p className="text-xs text-slate-500">{student.parentPhone}</p>
-                                <p className="text-[11px] text-slate-400">
-                                  {student.parentEmail || 'Pendaftaran tanpa email (offline)'}
-                                </p>
-                              </td>
-                              <td className="py-3 px-4 text-xs text-slate-700 space-y-0.5">
-                                <p className="font-semibold">{student.packageName}</p>
-                                <p className="text-slate-500">{student.branchName}</p>
-                                {typeof student.billingAmount === 'number' && (
-                                  <p className="font-mono font-bold text-slate-900">
-                                    {formatRupiah(student.billingAmount)}
-                                    {student.initialPaymentStatus
-                                      ? ` (${getPaymentStatusLabel(student.initialPaymentStatus)})`
-                                      : ''}
+                                </td>
+                                <td className="py-3 px-4 align-top">
+                                  <p className="font-medium text-[#141A23]">{student.parentName}</p>
+                                  <p className="text-xs font-mono text-[#3E4856]">{student.parentPhone}</p>
+                                  <p className="text-[11px] text-[#5E6774]">
+                                    {student.parentEmail || (meta.isMigration ? 'Input arsip berkas lama' : 'Tanpa email (offline)')}
                                   </p>
-                                )}
-                              </td>
-                              <td className="py-3 px-4 text-xs space-y-0.5">
-                                <p
-                                  className={`font-semibold ${
-                                    student.status === 'approved'
-                                      ? 'text-emerald-700'
-                                      : student.status === 'rejected'
-                                      ? 'text-rose-700'
-                                      : 'text-amber-700'
-                                  }`}
-                                >
-                                  {getStatusLabel(student.status)}
-                                </p>
-                                <p className="text-slate-500">
-                                  Belajar: {getAcademicStatusLabel(student.academicStatus)}
-                                </p>
-                                {student.nextDueAtIso && (
+                                </td>
+                                <td className="py-3 px-4 align-top text-xs text-[#3E4856] space-y-0.5">
+                                  <p className="font-semibold text-[#141A23]">{student.packageName}</p>
+                                  <p className="text-[#5E6774]">{student.branchName}</p>
+                                  {student.registeredAtIso && (
+                                    <p className="text-[11px] text-[#5E6774]">
+                                      Masuk: {formatJakartaDateTime(student.registeredAtIso)}
+                                    </p>
+                                  )}
+                                  {typeof student.billingAmount === 'number' && (
+                                    <p className="font-mono font-bold text-[#141A23] tabular-nums">
+                                      {formatRupiah(student.billingAmount)}
+                                      {student.initialPaymentStatus
+                                        ? ` (${getPaymentStatusLabel(student.initialPaymentStatus)})`
+                                        : ''}
+                                    </p>
+                                  )}
+                                </td>
+                                <td className="py-3 px-4 align-top text-xs space-y-0.5">
                                   <p
-                                    className={`font-medium ${
-                                      isDue ? 'text-rose-700 font-bold' : 'text-slate-600'
+                                    className={`font-semibold ${
+                                      student.status === 'approved'
+                                        ? 'text-emerald-700'
+                                        : student.status === 'rejected'
+                                        ? 'text-[#A61B38]'
+                                        : 'text-amber-700'
                                     }`}
                                   >
-                                    {isDue ? 'JATUH TEMPO: ' : 'Jatuh Tempo: '}
-                                    {formatJakartaDateTime(student.nextDueAtIso)}
+                                    {getStatusLabel(student.status)}
                                   </p>
-                                )}
-                              </td>
-                              <td className="py-3 px-4 text-right">
-                                <div className="inline-flex items-center gap-1.5">
-                                  {student.status === 'pending' && (
-                                    <>
-                                      <button
-                                        type="button"
-                                        disabled={actionBusy}
-                                        onClick={() => handleQuickDecision(student, 'approved')}
-                                        title="Setujui pendaftaran"
-                                        className="p-2 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-xl cursor-pointer"
-                                      >
-                                        <Check className="w-4 h-4" />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        disabled={actionBusy}
-                                        onClick={() => handleQuickDecision(student, 'rejected')}
-                                        title="Tolak pendaftaran"
-                                        className="p-2 text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-xl cursor-pointer"
-                                      >
-                                        <X className="w-4 h-4" />
-                                      </button>
-                                    </>
+                                  <p className="text-[#5E6774]">
+                                    Belajar: {getAcademicStatusLabel(student.academicStatus)}
+                                  </p>
+                                  {student.nextDueAtIso && (
+                                    <p
+                                      className={`font-medium ${
+                                        isDue ? 'text-[#A61B38] font-bold' : 'text-[#3E4856]'
+                                      }`}
+                                    >
+                                      {isDue ? 'JATUH TEMPO: ' : 'Jatuh Tempo: '}
+                                      {formatJakartaDateTime(student.nextDueAtIso)}
+                                    </p>
                                   )}
-                                  <button
-                                    type="button"
-                                    onClick={() => setSelectedStudent(student)}
-                                    className="px-3 py-1.5 text-xs font-semibold text-slate-800 bg-white/80 hover:bg-white border border-slate-200 rounded-xl cursor-pointer"
-                                  >
-                                    Detail / Edit
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmDeleteStudent(student)}
-                                    aria-label={`Hapus ${student.childName}`}
-                                    className="p-2 text-rose-700 hover:bg-rose-50 rounded-xl cursor-pointer"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                                </td>
+                                <td className="py-3 px-4 align-top text-right">
+                                  <div className="inline-flex items-center gap-1.5">
+                                    {student.status === 'pending' && (
+                                      <>
+                                        <button
+                                          type="button"
+                                          disabled={actionBusy}
+                                          onClick={() => handleQuickDecision(student, 'approved')}
+                                          title="Setujui pendaftaran"
+                                          className="p-2 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg cursor-pointer"
+                                        >
+                                          <Check className="w-4 h-4" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={actionBusy}
+                                          onClick={() => handleQuickDecision(student, 'rejected')}
+                                          title="Tolak pendaftaran"
+                                          className="p-2 text-[#A61B38] bg-rose-50 hover:bg-rose-100 rounded-lg cursor-pointer"
+                                        >
+                                          <X className="w-4 h-4" />
+                                        </button>
+                                      </>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const parsed = parseStudentArchiveMeta(student);
+                                        setSelectedStudent({
+                                          ...student,
+                                          birthDate: parsed.birthDate || '',
+                                          schoolOrigin: parsed.schoolOrigin || '',
+                                          studentAddress: parsed.studentAddress || '',
+                                          notes: parsed.cleanNotes || '',
+                                        });
+                                      }}
+                                      className="px-3 py-1.5 text-xs font-semibold text-[#141A23] bg-white hover:bg-[#F2EFE9] border border-[#E5E2D9] rounded-lg cursor-pointer"
+                                    >
+                                      Detail / Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteStudent(student)}
+                                      aria-label={`Hapus ${student.childName}`}
+                                      className="p-2 text-[#A61B38] hover:bg-rose-50 rounded-lg cursor-pointer"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+
+              return (
+                <div className="space-y-4">
+                  {/* Branch Switcher Pusat vs Cabang */}
+                  <div className="ios-glass rounded-xl p-3 sm:p-4 border border-[#E5E2D9] flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {(
+                        [
+                          {
+                            id: 'all',
+                            label: 'Semua Lokasi',
+                            count: filteredStudents.length,
+                          },
+                          {
+                            id: 'indramayu-kota',
+                            label: 'Indramayu Kota (Pusat)',
+                            count: splitFilteredStudents.pusat.length,
+                          },
+                          {
+                            id: 'terisi',
+                            label: 'Kecamatan Terisi (Cabang)',
+                            count: splitFilteredStudents.cabang.length,
+                          },
+                        ] as const
+                      ).map((tab) => {
+                        const active = branchFilter === tab.id;
+                        return (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => setBranchFilter(tab.id)}
+                            className={`inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg border transition-colors cursor-pointer ${
+                              active
+                                ? 'bg-[#141A23] text-white border-[#141A23]'
+                                : 'bg-white text-[#3E4856] border-[#E5E2D9] hover:border-[#141A23]'
+                            }`}
+                          >
+                            <span>{tab.label}</span>
+                            <span
+                              className={`px-1.5 py-0.5 text-[11px] font-mono rounded tabular-nums ${
+                                active ? 'bg-white/20 text-white' : 'bg-[#F2EFE9] text-[#141A23]'
+                              }`}
+                            >
+                              {tab.count}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {branchFilter === 'all' && (
+                        <button
+                          type="button"
+                          onClick={() => setSplitByBranch((prev) => !prev)}
+                          className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border cursor-pointer ${
+                            splitByBranch
+                              ? 'bg-[#0F6E66] text-white border-[#0F6E66]'
+                              : 'bg-white text-[#3E4856] border-[#E5E2D9]'
+                          }`}
+                        >
+                          <Columns2 className="w-3.5 h-3.5" />
+                          <span>
+                            {splitByBranch
+                              ? 'Tabel Pusat & Cabang Terpisah'
+                              : 'Gabungkan dalam 1 Tabel'}
+                          </span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('migration')}
+                        className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-[#A61B38] hover:bg-[#88132B] rounded-lg whitespace-nowrap cursor-pointer"
+                      >
+                        <FolderInput className="w-3.5 h-3.5" />
+                        <span>Pindah Data Murid (Arsip)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('offline')}
+                        className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#141A23] bg-white border border-[#E5E2D9] hover:border-[#141A23] rounded-lg whitespace-nowrap cursor-pointer"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span>+ Offline</span>
+                      </button>
+                    </div>
                   </div>
-                )}
-              </div>
-            )}
+
+                  {/* Detailed Filters */}
+                  <div className="ios-glass rounded-xl p-4 border border-[#E5E2D9] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div className="relative sm:col-span-2 lg:col-span-1">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        placeholder="Cari siswa, ortu, sekolah, alamat, HP..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-9 pr-3 py-2 min-h-[42px] text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                      />
+                    </div>
+                    <select
+                      aria-label="Filter Paket Belajar"
+                      value={packageFilter}
+                      onChange={(e) => setPackageFilter(e.target.value as typeof packageFilter)}
+                      className="px-3 py-2 min-h-[42px] text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                    >
+                      <option value="all">Semua Paket</option>
+                      <option value="paket-1">PAKET 1: CALISTUNG (TK–Kls 1)</option>
+                      <option value="paket-2">PAKET 2: Mata Pelajaran (Kls 2–5)</option>
+                      <option value="paket-3">PAKET 3: Persiapan TKA (Kls 6)</option>
+                    </select>
+                    <select
+                      aria-label="Filter Jalur Data"
+                      value={channelFilter}
+                      onChange={(e) => setChannelFilter(e.target.value as typeof channelFilter)}
+                      className="px-3 py-2 min-h-[42px] text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                    >
+                      <option value="all">Semua Jalur Masuk</option>
+                      <option value="online">Online Ortu</option>
+                      <option value="offline">Offline Admin</option>
+                      <option value="migration">Pindah Data (Arsip Berkas)</option>
+                    </select>
+                    <select
+                      aria-label="Filter Status Persetujuan"
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+                      className="px-3 py-2 min-h-[42px] text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                    >
+                      <option value="all">Semua Status</option>
+                      <option value="pending">Menunggu Persetujuan</option>
+                      <option value="approved">Disetujui</option>
+                      <option value="rejected">Ditolak</option>
+                    </select>
+                  </div>
+
+                  {filteredStudents.length === 0 ? (
+                    <div className="ios-glass rounded-xl p-10 text-center text-sm text-[#5E6774] border border-[#E5E2D9]">
+                      Belum ada data siswa yang sesuai dengan filter yang dipilih.
+                    </div>
+                  ) : branchFilter === 'all' && splitByBranch ? (
+                    <div className="space-y-6">
+                      {renderStudentTable(splitFilteredStudents.pusat, {
+                        title: 'TOMOYO EDUCATION INDRAMAYU KOTA (PUSAT)',
+                        badge: 'Pusat',
+                        tone: 'pusat',
+                      })}
+                      {renderStudentTable(splitFilteredStudents.cabang, {
+                        title: 'TOMOYO EDUCATION KECAMATAN TERISI (CABANG)',
+                        badge: 'Cabang',
+                        tone: 'cabang',
+                      })}
+                    </div>
+                  ) : branchFilter === 'indramayu-kota' ? (
+                    renderStudentTable(splitFilteredStudents.pusat, {
+                      title: 'TOMOYO EDUCATION INDRAMAYU KOTA (PUSAT)',
+                      badge: 'Pusat',
+                      tone: 'pusat',
+                    })
+                  ) : branchFilter === 'terisi' ? (
+                    renderStudentTable(splitFilteredStudents.cabang, {
+                      title: 'TOMOYO EDUCATION KECAMATAN TERISI (CABANG)',
+                      badge: 'Cabang',
+                      tone: 'cabang',
+                    })
+                  ) : (
+                    renderStudentTable(filteredStudents)
+                  )}
+                </div>
+              );
+            })()}
 
             {/* OFFLINE REGISTRATION TAB (ADMIN MANUAL INPUT) */}
             {activeTab === 'offline' && bundle && (() => {
@@ -1570,6 +1981,549 @@ export function AdminDashboardPage() {
               );
             })()}
 
+            {/* LEGACY STUDENT ARCHIVE MIGRATION TAB (PINDAH DATA MURID DARI BERKAS LAMA) */}
+            {activeTab === 'migration' && bundle && (() => {
+              const selectedPkg = bundle.packages.find((p) => p.slug === migrationDraft.packageId);
+              const liveBranchPrice = getPackagePriceForBranch(selectedPkg, migrationDraft.branchId);
+              const parsedEntryDate = migrationDraft.registeredAtLocal
+                ? new Date(migrationDraft.registeredAtLocal)
+                : new Date();
+              const validEntryDate = Number.isNaN(parsedEntryDate.getTime())
+                ? new Date()
+                : parsedEntryDate;
+              const computedNextDueIso =
+                migrationDraft.nextDueAtLocal &&
+                !Number.isNaN(new Date(migrationDraft.nextDueAtLocal).getTime())
+                  ? new Date(migrationDraft.nextDueAtLocal).toISOString()
+                  : computeNextMonthlyDueDate(validEntryDate).toISOString();
+
+              return (
+                <div className="space-y-6">
+                  <div className="ios-glass-subtle border border-[#E5E2D9] rounded-xl p-4 text-xs sm:text-sm text-[#141A23] space-y-1">
+                    <p className="font-bold">
+                      Pindah Data Murid Berjalan dari Berkas Fisik / Catatan Lama
+                    </p>
+                    <p className="text-[#3E4856]">
+                      Data murid yang dimasukkan di sini otomatis masuk ke{' '}
+                      <strong>Daftar Siswa (terpisah Pusat Indramayu Kota vs Cabang Terisi)</strong>,
+                      tercatat di <strong>Buku Pembayaran</strong>, dan terjadwal di pemantauan{' '}
+                      <strong>Jatuh Tempo Fonnte</strong>.
+                    </p>
+                  </div>
+
+                  {migrationBanner && (
+                    <div
+                      role="status"
+                      className={`rounded-xl p-4 border text-sm ${
+                        migrationBanner.type === 'success'
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                          : 'bg-amber-50 border-amber-200 text-amber-950'
+                      }`}
+                    >
+                      {migrationBanner.text}
+                    </div>
+                  )}
+
+                  {migrationErrors.length > 0 && (
+                    <div
+                      role="alert"
+                      className="rounded-xl p-4 border border-rose-200 bg-rose-50 text-sm text-rose-900 space-y-1"
+                    >
+                      <p className="font-bold">Periksa kembali isian berkas murid:</p>
+                      <ul className="list-disc pl-5 text-xs space-y-0.5">
+                        {migrationErrors.map((err, i) => (
+                          <li key={i}>{err}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void handleCreateMigratedStudent('next');
+                    }}
+                    className="ios-glass rounded-xl border border-[#E5E2D9] p-6 sm:p-8 space-y-6"
+                  >
+                    {/* 1. Identitas Murid */}
+                    <div className="space-y-4">
+                      <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-[#A61B38] border-b border-[#E5E2D9] pb-2">
+                        1. Identitas Siswa (Sesuai Berkas)
+                      </h2>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-[#3E4856] mb-1.5">
+                            Nama Lengkap Siswa *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Nama lengkap siswa"
+                            value={migrationDraft.childName}
+                            onChange={(e) =>
+                              setMigrationDraft((prev) => ({ ...prev, childName: e.target.value }))
+                            }
+                            className="w-full px-3.5 py-2.5 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-[#3E4856] mb-1.5">
+                            Tanggal Lahir Siswa
+                          </label>
+                          <input
+                            type="date"
+                            value={migrationDraft.birthDate}
+                            onChange={(e) =>
+                              setMigrationDraft((prev) => ({ ...prev, birthDate: e.target.value }))
+                            }
+                            className="w-full px-3.5 py-2.5 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-[#3E4856] mb-1.5">
+                            Jenis Kelamin *
+                          </label>
+                          <select
+                            value={migrationDraft.childGender}
+                            onChange={(e) =>
+                              setMigrationDraft((prev) => ({
+                                ...prev,
+                                childGender: e.target.value as ChildGender,
+                              }))
+                            }
+                            className="w-full px-3.5 py-2.5 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                          >
+                            <option value="Laki-laki">Laki-laki</option>
+                            <option value="Perempuan">Perempuan</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-[#3E4856] mb-1.5">
+                            Kelas / Tingkat *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Contoh: SD Kelas 4"
+                            value={migrationDraft.gradeLevel}
+                            onChange={(e) =>
+                              setMigrationDraft((prev) => ({ ...prev, gradeLevel: e.target.value }))
+                            }
+                            className="w-full px-3.5 py-2.5 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-[#3E4856] mb-1.5">
+                            Asal Sekolah (Opsional)
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Contoh: SDN 1 Indramayu"
+                            value={migrationDraft.schoolOrigin || ''}
+                            onChange={(e) =>
+                              setMigrationDraft((prev) => ({
+                                ...prev,
+                                schoolOrigin: e.target.value,
+                              }))
+                            }
+                            className="w-full px-3.5 py-2.5 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-[#3E4856] mb-1.5">
+                            Alamat Siswa (Opsional)
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Desa / Kecamatan / Jalan"
+                            value={migrationDraft.studentAddress || ''}
+                            onChange={(e) =>
+                              setMigrationDraft((prev) => ({
+                                ...prev,
+                                studentAddress: e.target.value,
+                              }))
+                            }
+                            className="w-full px-3.5 py-2.5 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Foto Siswa Opsional */}
+                      <div className="p-4 rounded-xl bg-white border border-[#E5E2D9] space-y-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-bold text-[#141A23]">
+                              Foto Siswa (Opsional — Cloudinary)
+                            </p>
+                            <p className="text-[11px] text-[#5E6774]">
+                              Jika foto murid sudah tersedia di arsip, unggah di sini (bisa dilengkapi belakangan).
+                            </p>
+                          </div>
+                          <label className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold bg-[#141A23] hover:bg-[#A61B38] text-white rounded-lg cursor-pointer shrink-0">
+                            <Upload className="w-4 h-4" />
+                            <span>
+                              {migrationPhotoUploading
+                                ? 'Mengunggah ke Cloudinary...'
+                                : migrationDraft.childPhotoUrl
+                                ? 'Ganti Foto Siswa'
+                                : 'Upload Foto Siswa'}
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp"
+                              className="hidden"
+                              onChange={(e) => handleMigrationPhotoUpload(e.target.files?.[0])}
+                            />
+                          </label>
+                        </div>
+                        {migrationDraft.childPhotoUrl && (
+                          <div className="flex items-center gap-4 pt-1">
+                            <img
+                              src={migrationDraft.childPhotoUrl}
+                              alt="Preview Foto Siswa Arsip"
+                              className="max-h-32 w-auto rounded-lg object-contain border border-[#E5E2D9] bg-white p-1"
+                              referrerPolicy="no-referrer"
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setMigrationDraft((prev) => ({ ...prev, childPhotoUrl: '' }))
+                              }
+                              className="text-xs font-semibold text-[#A61B38] hover:underline cursor-pointer"
+                            >
+                              Hapus Foto
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 2. Identitas Orang Tua & Lokasi Cabang */}
+                    <div className="space-y-4">
+                      <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-[#0F6E66] border-b border-[#E5E2D9] pb-2">
+                        2. Orang Tua, Cabang &amp; Penempatan Program
+                      </h2>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-[#3E4856] mb-1.5">
+                            Nama Orang Tua / Wali *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Nama lengkap orang tua"
+                            value={migrationDraft.parentName}
+                            onChange={(e) =>
+                              setMigrationDraft((prev) => ({ ...prev, parentName: e.target.value }))
+                            }
+                            className="w-full px-3.5 py-2.5 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-[#3E4856] mb-1.5">
+                            Kontak / WhatsApp Orang Tua *
+                          </label>
+                          <input
+                            type="tel"
+                            required
+                            placeholder="Contoh: 081234567890"
+                            value={migrationDraft.parentPhone}
+                            onChange={(e) =>
+                              setMigrationDraft((prev) => ({
+                                ...prev,
+                                parentPhone: e.target.value,
+                              }))
+                            }
+                            className="w-full px-3.5 py-2.5 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-[#3E4856] mb-1.5">
+                            Cabang (Pusat / Cabang) *
+                          </label>
+                          <select
+                            value={migrationDraft.branchId}
+                            onChange={(e) =>
+                              setMigrationDraft((prev) => ({
+                                ...prev,
+                                branchId: e.target.value as BranchId,
+                              }))
+                            }
+                            className="w-full px-3.5 py-2.5 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                          >
+                            {bundle.branches.map((b) => (
+                              <option key={b.id} value={b.slug}>
+                                {b.name} ({b.roleLabel})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-[#3E4856] mb-1.5">
+                            Paket Belajar *
+                          </label>
+                          <select
+                            value={migrationDraft.packageId}
+                            onChange={(e) =>
+                              setMigrationDraft((prev) => ({
+                                ...prev,
+                                packageId: e.target.value as PackageId,
+                              }))
+                            }
+                            className="w-full px-3.5 py-2.5 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                          >
+                            {bundle.packages.map((p) => {
+                              const branchPrice = getPackagePriceForBranch(
+                                p,
+                                migrationDraft.branchId
+                              );
+                              return (
+                                <option key={p.id} value={p.slug}>
+                                  {p.title} —{' '}
+                                  {branchPrice !== null
+                                    ? formatRupiah(branchPrice)
+                                    : 'Tarif manual'}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-[#3E4856] mb-1.5">
+                            Tanggal Masuk Siswa *
+                          </label>
+                          <input
+                            type="datetime-local"
+                            required
+                            value={migrationDraft.registeredAtLocal}
+                            onChange={(e) =>
+                              setMigrationDraft((prev) => ({
+                                ...prev,
+                                registeredAtLocal: e.target.value,
+                              }))
+                            }
+                            className="w-full px-3.5 py-2.5 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-[#3E4856] mb-1.5">
+                            Status Belajar Saat Ini *
+                          </label>
+                          <select
+                            value={migrationDraft.academicStatus}
+                            onChange={(e) =>
+                              setMigrationDraft((prev) => ({
+                                ...prev,
+                                academicStatus: e.target.value as AcademicStatus,
+                              }))
+                            }
+                            className="w-full px-3.5 py-2.5 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                          >
+                            <option value="aktif">Aktif</option>
+                            <option value="menunggu">Menunggu</option>
+                            <option value="lulus">Lulus</option>
+                            <option value="nonaktif">Nonaktif</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 3. Info Tagihan & Pembayaran */}
+                    <div className="space-y-4 p-4 rounded-xl bg-[#F8F6F0] border border-[#E5E2D9]">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span className="font-bold text-[#141A23]">
+                          3. Info Tagihan &amp; Pembayaran Terakhir
+                        </span>
+                        <span
+                          className={`font-mono font-bold ${
+                            liveBranchPrice !== null ? 'text-emerald-700' : 'text-amber-700'
+                          }`}
+                        >
+                          Tarif CMS:{' '}
+                          {liveBranchPrice !== null ? formatRupiah(liveBranchPrice) : 'Manual'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-[#3E4856] mb-1">
+                            Nominal Tagihan (Rp) *
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            required
+                            placeholder="250000"
+                            value={migrationDraft.billingAmount}
+                            onChange={(e) =>
+                              setMigrationDraft((prev) => ({
+                                ...prev,
+                                billingAmount: e.target.value === '' ? '' : Number(e.target.value),
+                              }))
+                            }
+                            className="w-full px-3 py-2 text-sm font-mono bg-white border border-[#E5E2D9] rounded-lg"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-[#3E4856] mb-1">
+                            Status Tagihan *
+                          </label>
+                          <select
+                            value={migrationDraft.initialPaymentStatus}
+                            onChange={(e) =>
+                              setMigrationDraft((prev) => ({
+                                ...prev,
+                                initialPaymentStatus: e.target.value as PaymentStatus,
+                              }))
+                            }
+                            className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                          >
+                            <option value="lunas">Lunas</option>
+                            <option value="cicilan">Cicilan</option>
+                            <option value="belum_bayar">Belum Bayar</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-[#3E4856] mb-1">
+                            Metode Pembayaran
+                          </label>
+                          <select
+                            value={migrationDraft.paymentMethod}
+                            onChange={(e) =>
+                              setMigrationDraft((prev) => ({
+                                ...prev,
+                                paymentMethod: e.target.value,
+                              }))
+                            }
+                            className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                          >
+                            <option value="Tunai">Tunai</option>
+                            <option value="Transfer">Transfer</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-[#3E4856] mb-1">
+                            Periode Tagihan (Opsional)
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Mis. November 2026"
+                            value={migrationDraft.paymentPeriodLabel || ''}
+                            onChange={(e) =>
+                              setMigrationDraft((prev) => ({
+                                ...prev,
+                                paymentPeriodLabel: e.target.value,
+                              }))
+                            }
+                            className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                        <div>
+                          <label className="block text-xs font-semibold text-[#3E4856] mb-1">
+                            Jatuh Tempo Berikutnya (Opsional — kosongkan untuk otomatis +1 bulan)
+                          </label>
+                          <input
+                            type="datetime-local"
+                            value={migrationDraft.nextDueAtLocal || ''}
+                            onChange={(e) =>
+                              setMigrationDraft((prev) => ({
+                                ...prev,
+                                nextDueAtLocal: e.target.value,
+                              }))
+                            }
+                            className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                          />
+                        </div>
+                        <div className="p-3 rounded-lg bg-white border border-[#E5E2D9] text-xs space-y-0.5">
+                          <p className="font-semibold text-[#3E4856]">
+                            Jadwal Jatuh Tempo Terhitung:
+                          </p>
+                          <p className="font-mono font-bold text-[#0F6E66]">
+                            {formatJakartaDateTime(computedNextDueIso)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-[#3E4856] mb-1.5">
+                          Catatan Berkas / Keterangan Tambahan (Opsional)
+                        </label>
+                        <textarea
+                          rows={2}
+                          placeholder="Catatan dari formulir kertas lama, jadwal les, dll..."
+                          value={migrationDraft.notes || ''}
+                          onChange={(e) =>
+                            setMigrationDraft((prev) => ({ ...prev, notes: e.target.value }))
+                          }
+                          className="w-full px-3.5 py-2.5 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                        />
+                      </div>
+
+                      <label className="inline-flex items-center gap-2 text-xs text-[#3E4856] cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(migrationDraft.notifyWhatsappOnSave)}
+                          onChange={(e) =>
+                            setMigrationDraft((prev) => ({
+                              ...prev,
+                              notifyWhatsappOnSave: e.target.checked,
+                            }))
+                          }
+                          className="rounded border-slate-300"
+                        />
+                        <span>Kirim notifikasi arsip ke WhatsApp Admin (Fonnte) saat disimpan</span>
+                      </label>
+                    </div>
+
+                    <div className="flex flex-wrap justify-end gap-3 pt-2 border-t border-[#E5E2D9]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMigrationDraft(
+                            createInitialMigrationDraft(
+                              migrationDraft.branchId,
+                              migrationDraft.packageId
+                            )
+                          );
+                          setMigrationErrors([]);
+                          setMigrationBanner(null);
+                        }}
+                        className="px-4 py-2.5 text-sm font-semibold text-[#3E4856] bg-[#F2EFE9] rounded-lg cursor-pointer"
+                      >
+                        Reset Formulir
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={actionBusy || migrationPhotoUploading}
+                        className="px-5 py-2.5 text-sm font-bold text-white bg-[#141A23] hover:bg-[#0F6E66] rounded-lg cursor-pointer disabled:opacity-60"
+                      >
+                        {actionBusy ? 'Menyimpan...' : 'Simpan & Input Murid Berikutnya'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={actionBusy || migrationPhotoUploading}
+                        onClick={() => void handleCreateMigratedStudent('list')}
+                        className="px-5 py-2.5 text-sm font-bold text-white bg-[#A61B38] hover:bg-[#88132B] rounded-lg cursor-pointer disabled:opacity-60"
+                      >
+                        {actionBusy ? 'Menyimpan...' : 'Simpan & Buka Daftar Siswa'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              );
+            })()}
+
             {/* CMS TAB */}
             {activeTab === 'cms' && bundle && (
               <AdminCmsPanel
@@ -1917,59 +2871,84 @@ export function AdminDashboardPage() {
                         <thead>
                           <tr className="border-b border-slate-300 text-slate-700">
                             <th className="py-2 pr-3">Foto</th>
-                            <th className="py-2 pr-3">Nama Siswa &amp; Gender</th>
-                            <th className="py-2 pr-3">Kelas</th>
-                            <th className="py-2 pr-3">Paket &amp; Jalur</th>
+                            <th className="py-2 pr-3">Nama Siswa, Lahir &amp; Gender</th>
+                            <th className="py-2 pr-3">Kelas &amp; Sekolah</th>
+                            <th className="py-2 pr-3">Paket, Jalur &amp; Masuk</th>
                             <th className="py-2 pr-3">Cabang</th>
                             <th className="py-2 pr-3">Orang Tua</th>
                             <th className="py-2">Status &amp; Jatuh Tempo</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-200">
-                          {reportStudents.map((s) => (
-                            <tr key={s.id}>
-                              <td className="py-2 pr-3">
-                                {s.childPhotoUrl ? (
-                                  <img
-                                    src={s.childPhotoUrl}
-                                    alt={s.childName}
-                                    className="w-10 h-10 rounded object-cover border border-slate-200"
-                                    referrerPolicy="no-referrer"
-                                  />
-                                ) : (
-                                  <span className="text-[11px] text-slate-400">-</span>
-                                )}
-                              </td>
-                              <td className="py-2 pr-3">
-                                <span className="font-semibold">{s.childName}</span>
-                                {s.childGender && (
+                          {reportStudents.map((s) => {
+                            const meta = parseStudentArchiveMeta(s);
+                            const channelText = meta.isMigration
+                              ? 'Arsip Berkas'
+                              : s.registrationChannel === 'offline'
+                              ? 'Offline Admin'
+                              : 'Online';
+                            return (
+                              <tr key={s.id}>
+                                <td className="py-2 pr-3">
+                                  {s.childPhotoUrl ? (
+                                    <img
+                                      src={s.childPhotoUrl}
+                                      alt={s.childName}
+                                      className="w-10 h-10 rounded object-cover border border-slate-200"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  ) : (
+                                    <span className="text-[11px] text-slate-400">-</span>
+                                  )}
+                                </td>
+                                <td className="py-2 pr-3">
+                                  <span className="font-semibold">{s.childName}</span>
+                                  {s.childGender && (
+                                    <span className="block text-[11px] text-slate-500">
+                                      {s.childGender}
+                                    </span>
+                                  )}
+                                  {meta.birthDate && (
+                                    <span className="block text-[11px] text-slate-500">
+                                      Lahir: {formatIndonesianDate(meta.birthDate)}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-2 pr-3">
+                                  <span>{s.gradeLevel}</span>
+                                  {meta.schoolOrigin && (
+                                    <span className="block text-[11px] text-slate-500">
+                                      {meta.schoolOrigin}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-2 pr-3">
+                                  <span>{s.packageName}</span>
                                   <span className="block text-[11px] text-slate-500">
-                                    {s.childGender}
+                                    {channelText}
+                                    {typeof s.billingAmount === 'number'
+                                      ? ` · ${formatRupiah(s.billingAmount)}`
+                                      : ''}
                                   </span>
-                                )}
-                              </td>
-                              <td className="py-2 pr-3">{s.gradeLevel}</td>
-                              <td className="py-2 pr-3">
-                                <span>{s.packageName}</span>
-                                <span className="block text-[11px] text-slate-500">
-                                  {s.registrationChannel === 'offline' ? 'Offline Admin' : 'Online'}
-                                  {typeof s.billingAmount === 'number'
-                                    ? ` · ${formatRupiah(s.billingAmount)}`
-                                    : ''}
-                                </span>
-                              </td>
-                              <td className="py-2 pr-3">{s.branchName}</td>
-                              <td className="py-2 pr-3">{s.parentName} ({s.parentPhone})</td>
-                              <td className="py-2">
-                                <span className="font-semibold block">{getStatusLabel(s.status)}</span>
-                                {s.nextDueAtIso && (
-                                  <span className="text-[11px] text-slate-500">
-                                    JT: {formatJakartaDateTime(s.nextDueAtIso)}
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
+                                  {s.registeredAtIso && (
+                                    <span className="block text-[11px] text-slate-500">
+                                      Masuk: {formatJakartaDateTime(s.registeredAtIso)}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-2 pr-3">{s.branchName}</td>
+                                <td className="py-2 pr-3">{s.parentName} ({s.parentPhone})</td>
+                                <td className="py-2">
+                                  <span className="font-semibold block">{getStatusLabel(s.status)}</span>
+                                  {s.nextDueAtIso && (
+                                    <span className="text-[11px] text-slate-500">
+                                      JT: {formatJakartaDateTime(s.nextDueAtIso)}
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     )
@@ -2222,25 +3201,40 @@ export function AdminDashboardPage() {
             {/* WHATSAPP FONNTE TAB */}
             {activeTab === 'whatsapp' && (
               <div className="space-y-6">
-                <div className="ios-glass rounded-2xl p-6 space-y-4">
-                  <h2 className="text-base font-bold text-slate-900">
-                    Status Integrasi WhatsApp Fonnte
-                  </h2>
+                <div className="ios-glass rounded-xl border border-[#E5E2D9] p-6 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <h2 className="text-base font-bold text-[#141A23]">
+                      Status Integrasi &amp; Diagnostik Device WhatsApp Fonnte
+                    </h2>
+                    <button
+                      type="button"
+                      disabled={checkingDevice}
+                      onClick={() => void checkFonnteDevice()}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#141A23] bg-white border border-[#E5E2D9] hover:border-[#141A23] rounded-lg cursor-pointer disabled:opacity-60"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${checkingDevice ? 'animate-spin' : ''}`} />
+                      <span>
+                        {checkingDevice ? 'Memeriksa Device...' : 'Cek Status Device 083121902760'}
+                      </span>
+                    </button>
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                     <div className="p-4 rounded-xl ios-glass-subtle">
-                      <p className="text-xs text-slate-500">Nomor Pengirim (Device Fonnte)</p>
-                      <p className="font-mono font-bold text-slate-900 mt-1">
+                      <p className="text-xs text-[#5E6774]">Nomor Pengirim Wajib (Device Fonnte)</p>
+                      <p className="font-mono font-bold text-[#141A23] mt-1">
                         {FONNTE_SENDER_DISPLAY} ({FONNTE_SENDER_NUMBER})
                       </p>
+                      <p className="text-[11px] text-[#5E6774] mt-0.5">083121902760</p>
                     </div>
                     <div className="p-4 rounded-xl ios-glass-subtle">
-                      <p className="text-xs text-slate-500">Nomor Penerima Notifikasi Admin</p>
-                      <p className="font-mono font-bold text-slate-900 mt-1">
+                      <p className="text-xs text-[#5E6774]">Nomor Penerima Notifikasi Admin</p>
+                      <p className="font-mono font-bold text-[#141A23] mt-1">
                         {ADMIN_WHATSAPP_TARGET}
                       </p>
                     </div>
                     <div className="p-4 rounded-xl ios-glass-subtle">
-                      <p className="text-xs text-slate-500">Status Backend Secret (FONNTE_TOKEN)</p>
+                      <p className="text-xs text-[#5E6774]">Status Backend Secret (FONNTE_TOKEN)</p>
                       <p
                         className={`font-bold mt-1 ${
                           serverAuthState.fonnteConfigured
@@ -2255,16 +3249,77 @@ export function AdminDashboardPage() {
                     </div>
                   </div>
 
-                  {!serverAuthState.fonnteConfigured && (
-                    <div className="p-4 rounded-xl bg-amber-50/90 border border-amber-200 text-xs sm:text-sm text-amber-900 space-y-1.5">
-                      <p className="font-bold">Cara Mengaktifkan Secret FONNTE_TOKEN:</p>
-                      <p>
-                        1. Buka panel Secrets di Google AI Studio (atau Environment Variables pada dashboard Vercel).
+                  {fonnteDevice && (
+                    <div
+                      className={`p-4 rounded-xl border text-xs sm:text-sm space-y-2 ${
+                        fonnteDevice.connected
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                          : 'bg-rose-50 border-rose-200 text-rose-950'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="inline-flex items-center gap-2 font-bold">
+                          {fonnteDevice.connected ? (
+                            <Wifi className="w-4 h-4 text-emerald-700" />
+                          ) : (
+                            <WifiOff className="w-4 h-4 text-[#A61B38]" />
+                          )}
+                          <span>
+                            {fonnteDevice.connected
+                              ? 'Device Fonnte Terhubung & Token Valid'
+                              : 'Device / Token Fonnte Bermasalah'}
+                          </span>
+                        </span>
+                        {typeof fonnteDevice.tokenLength === 'number' && (
+                          <span className="font-mono text-[11px] text-[#5E6774]">
+                            Panjang token terbaca: {fonnteDevice.tokenLength} karakter
+                          </span>
+                        )}
+                      </div>
+                      <p>{fonnteDevice.detail}</p>
+                      {(fonnteDevice.deviceNumber || fonnteDevice.deviceName || fonnteDevice.quota) && (
+                        <div className="flex flex-wrap gap-4 pt-1 text-xs font-mono">
+                          {fonnteDevice.deviceNumber && (
+                            <span>Device Terdeteksi: {fonnteDevice.deviceNumber}</span>
+                          )}
+                          {fonnteDevice.deviceName && (
+                            <span>Nama Device: {fonnteDevice.deviceName}</span>
+                          )}
+                          {fonnteDevice.quota && <span>Sisa Kuota: {fonnteDevice.quota}</span>}
+                        </div>
+                      )}
+                      {fonnteDevice.deviceNumber &&
+                        !fonnteDevice.deviceNumber.includes('83121902760') && (
+                          <div className="flex items-start gap-2 pt-1 text-xs font-semibold text-amber-900">
+                            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                            <span>
+                              Perhatian: Token saat ini terhubung ke nomor {fonnteDevice.deviceNumber}, bukan nomor utama 083121902760 ({FONNTE_SENDER_NUMBER}).
+                            </span>
+                          </div>
+                        )}
+                    </div>
+                  )}
+
+                  {(!serverAuthState.fonnteConfigured ||
+                    (fonnteDevice && !fonnteDevice.connected) ||
+                    waTestResult?.status === 'failed') && (
+                    <div className="p-4 rounded-xl bg-amber-50/90 border border-amber-200 text-xs sm:text-sm text-amber-950 space-y-1.5">
+                      <p className="font-bold flex items-center gap-1.5">
+                        <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                        <span>Panduan Memperbaiki Error &ldquo;unknown token&rdquo; untuk 083121902760 di Vercel:</span>
                       </p>
                       <p>
-                        2. Tambahkan variabel bernama <code className="font-mono font-bold">FONNTE_TOKEN</code> berisi token device Fonnte Anda (jangan pernah menaruh token di kode frontend).
+                        1. Di dashboard Fonnte (<strong>Menu Device</strong>), buka device nomor{' '}
+                        <code className="font-mono font-bold">083121902760</code> dan salin{' '}
+                        <strong>Device Token</strong>-nya (bukan <em>Account Token</em> dari menu Profile, karena Account Token menghasilkan error <code className="font-mono">unknown token</code> pada endpoint kirim pesan).
                       </p>
-                      <p>3. Restart server / redeploy agar backend membaca variabel baru.</p>
+                      <p>
+                        2. Buka <strong>Vercel → Settings → Environment Variables</strong>, edit variabel{' '}
+                        <code className="font-mono font-bold">FONNTE_TOKEN</code>, pastikan dicentang untuk environment <strong>Production</strong>, dan tempel token murni tanpa spasi, tanda kutip, atau kata <code className="font-mono">Bearer</code>.
+                      </p>
+                      <p>
+                        3. Buka tab <strong>Deployments</strong> lalu klik <strong>Redeploy</strong> pada deployment terbaru dengan opsi tanpa cache agar Vercel Serverless memuat token Production yang baru.
+                      </p>
                     </div>
                   )}
 
@@ -2273,7 +3328,7 @@ export function AdminDashboardPage() {
                       type="button"
                       disabled={waTesting}
                       onClick={handleTestWhatsapp}
-                      className="px-5 py-2.5 min-h-[44px] text-sm font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-xl cursor-pointer disabled:opacity-60"
+                      className="px-5 py-2.5 min-h-[44px] text-sm font-semibold text-white bg-[#0F6E66] hover:bg-[#0B544E] rounded-xl cursor-pointer disabled:opacity-60"
                     >
                       {waTesting
                         ? 'Mengirim Uji WhatsApp...'
@@ -2378,9 +3433,9 @@ export function AdminDashboardPage() {
                                 </td>
                                 <td className="py-3 pr-3">
                                   <span
-                                    className={`inline-block px-2.5 py-1 text-[11px] font-bold rounded-full ${
+                                    className={`inline-block px-2.5 py-1 text-[11px] font-bold rounded-md ${
                                       dueNow
-                                        ? 'bg-rose-100 text-rose-800'
+                                        ? 'bg-rose-100 text-[#A61B38]'
                                         : 'bg-emerald-100 text-emerald-800'
                                     }`}
                                   >
@@ -2491,15 +3546,23 @@ export function AdminDashboardPage() {
           aria-modal="true"
           aria-label="Detail dan Edit Pendaftaran Siswa"
         >
-          <div className="ios-glass-strong rounded-3xl max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
-            <h2 className="text-lg font-bold text-slate-900">Kelola Data Siswa</h2>
-            <div className="p-3.5 ios-glass-subtle rounded-2xl text-xs text-slate-700 space-y-0.5">
-              <p><strong>Orang Tua:</strong> {selectedStudent.parentName}</p>
+          <div className="ios-glass-strong rounded-2xl max-w-xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-lg font-bold text-[#141A23]">Kelola Data Siswa</h2>
+            <div className="p-3.5 ios-glass-subtle rounded-xl text-xs text-slate-700 space-y-0.5">
               <p><strong>Email Google:</strong> {selectedStudent.parentEmail || '-'}</p>
               <p>
                 <strong>Jalur Daftar:</strong>{' '}
-                {selectedStudent.registrationChannel === 'offline' ? 'Offline (Input Admin)' : 'Online (Orang Tua)'}
+                {parseStudentArchiveMeta(selectedStudent).isMigration
+                  ? 'Pindah Data Murid (Arsip Berkas)'
+                  : selectedStudent.registrationChannel === 'offline'
+                  ? 'Offline (Input Admin)'
+                  : 'Online (Orang Tua)'}
               </p>
+              {selectedStudent.registeredAtIso && (
+                <p>
+                  <strong>Tanggal Masuk:</strong> {formatJakartaDateTime(selectedStudent.registeredAtIso)}
+                </p>
+              )}
               {selectedStudent.nextDueAtIso && (
                 <p>
                   <strong>Jatuh Tempo Berikutnya:</strong> {formatJakartaDateTime(selectedStudent.nextDueAtIso)}
@@ -2509,33 +3572,33 @@ export function AdminDashboardPage() {
             </div>
 
             {/* Child Photo Preview + Cloudinary Replace */}
-            <div className="p-4 rounded-2xl bg-white/80 border border-slate-200 space-y-3 text-center">
+            <div className="p-4 rounded-xl bg-white border border-[#E5E2D9] space-y-3 text-center">
               <p className="text-xs font-bold text-slate-700">Foto Siswa (Cloudinary)</p>
               {selectedStudent.childPhotoUrl ? (
                 <div className="space-y-2">
                   <img
                     src={selectedStudent.childPhotoUrl}
                     alt={`Foto ${selectedStudent.childName}`}
-                    className="max-h-60 w-auto mx-auto object-contain rounded-xl shadow-xs"
+                    className="max-h-52 w-auto mx-auto object-contain rounded-lg shadow-xs"
                     referrerPolicy="no-referrer"
                   />
                   <a
                     href={selectedStudent.childPhotoUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs font-semibold text-rose-700 hover:underline"
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-[#A61B38] hover:underline"
                   >
                     <span>Buka Ukuran Penuh</span>
                     <ExternalLink className="w-3 h-3" />
                   </a>
                 </div>
               ) : (
-                <p className="text-xs text-slate-500 py-3">Belum ada foto siswa terunggah.</p>
+                <p className="text-xs text-slate-500 py-2">Belum ada foto siswa terunggah.</p>
               )}
               <div>
-                <label className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-slate-900 text-white rounded-xl cursor-pointer">
+                <label className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-[#141A23] text-white rounded-lg cursor-pointer">
                   <Upload className="w-3.5 h-3.5" />
-                  <span>{studentPhotoUploading ? 'Mengunggah...' : 'Ganti Foto Siswa'}</span>
+                  <span>{studentPhotoUploading ? 'Mengunggah...' : 'Unggah / Ganti Foto Siswa'}</span>
                   <input
                     type="file"
                     accept="image/jpeg,image/png,image/webp"
@@ -2547,7 +3610,7 @@ export function AdminDashboardPage() {
             </div>
 
             <form onSubmit={handleSaveSelectedStudent} className="space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Nama Siswa</label>
                   <input
@@ -2557,9 +3620,23 @@ export function AdminDashboardPage() {
                     onChange={(e) =>
                       setSelectedStudent({ ...selectedStudent, childName: e.target.value })
                     }
-                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                    className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
                   />
                 </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Tanggal Lahir</label>
+                  <input
+                    type="date"
+                    value={selectedStudent.birthDate || ''}
+                    onChange={(e) =>
+                      setSelectedStudent({ ...selectedStudent, birthDate: e.target.value })
+                    }
+                    className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Jenis Kelamin</label>
                   <select
@@ -2570,7 +3647,7 @@ export function AdminDashboardPage() {
                         childGender: e.target.value as ChildGender,
                       })
                     }
-                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                    className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
                   >
                     <option value="Laki-laki">Laki-laki</option>
                     <option value="Perempuan">Perempuan</option>
@@ -2585,7 +3662,34 @@ export function AdminDashboardPage() {
                     onChange={(e) =>
                       setSelectedStudent({ ...selectedStudent, gradeLevel: e.target.value })
                     }
-                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                    className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Asal Sekolah</label>
+                  <input
+                    type="text"
+                    placeholder="Opsional"
+                    value={selectedStudent.schoolOrigin || ''}
+                    onChange={(e) =>
+                      setSelectedStudent({ ...selectedStudent, schoolOrigin: e.target.value })
+                    }
+                    className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Alamat Siswa</label>
+                  <input
+                    type="text"
+                    placeholder="Opsional"
+                    value={selectedStudent.studentAddress || ''}
+                    onChange={(e) =>
+                      setSelectedStudent({ ...selectedStudent, studentAddress: e.target.value })
+                    }
+                    className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
                   />
                 </div>
               </div>
@@ -2604,7 +3708,7 @@ export function AdminDashboardPage() {
                         billingAmount: e.target.value === '' ? undefined : Number(e.target.value),
                       })
                     }
-                    className="w-full px-3 py-2 text-sm font-mono bg-white border border-slate-300 rounded-xl"
+                    className="w-full px-3 py-2 text-sm font-mono bg-white border border-[#E5E2D9] rounded-lg"
                   />
                 </div>
                 <div>
@@ -2617,7 +3721,7 @@ export function AdminDashboardPage() {
                         initialPaymentStatus: e.target.value as PaymentStatus,
                       })
                     }
-                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                    className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
                   >
                     <option value="belum_bayar">Belum Bayar</option>
                     <option value="cicilan">Cicilan</option>
@@ -2637,7 +3741,7 @@ export function AdminDashboardPage() {
                         packageId: e.target.value as PackageId,
                       })
                     }
-                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                    className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
                   >
                     {bundle.packages.map((p) => (
                       <option key={p.id} value={p.slug}>
@@ -2647,7 +3751,7 @@ export function AdminDashboardPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Cabang</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Cabang (Pusat / Cabang)</label>
                   <select
                     value={selectedStudent.branchId}
                     onChange={(e) =>
@@ -2656,7 +3760,7 @@ export function AdminDashboardPage() {
                         branchId: e.target.value as BranchId,
                       })
                     }
-                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                    className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
                   >
                     {bundle.branches.map((b) => (
                       <option key={b.id} value={b.slug}>
@@ -2664,6 +3768,55 @@ export function AdminDashboardPage() {
                       </option>
                     ))}
                   </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Tanggal Masuk Siswa
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={
+                      selectedStudent.registeredAtIso &&
+                      !Number.isNaN(new Date(selectedStudent.registeredAtIso).getTime())
+                        ? toLocalDateTimeInputValue(new Date(selectedStudent.registeredAtIso))
+                        : ''
+                    }
+                    onChange={(e) =>
+                      setSelectedStudent({
+                        ...selectedStudent,
+                        registeredAtIso: e.target.value
+                          ? new Date(e.target.value).toISOString()
+                          : undefined,
+                      })
+                    }
+                    className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Jatuh Tempo Berikutnya
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={
+                      selectedStudent.nextDueAtIso &&
+                      !Number.isNaN(new Date(selectedStudent.nextDueAtIso).getTime())
+                        ? toLocalDateTimeInputValue(new Date(selectedStudent.nextDueAtIso))
+                        : ''
+                    }
+                    onChange={(e) =>
+                      setSelectedStudent({
+                        ...selectedStudent,
+                        nextDueAtIso: e.target.value
+                          ? new Date(e.target.value).toISOString()
+                          : undefined,
+                      })
+                    }
+                    className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                  />
                 </div>
               </div>
 
@@ -2680,7 +3833,7 @@ export function AdminDashboardPage() {
                         status: e.target.value as RegistrationStatus,
                       })
                     }
-                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                    className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
                   >
                     <option value="pending">Menunggu Persetujuan</option>
                     <option value="approved">Disetujui</option>
@@ -2699,7 +3852,7 @@ export function AdminDashboardPage() {
                         academicStatus: e.target.value as AcademicStatus,
                       })
                     }
-                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                    className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
                   >
                     <option value="menunggu">Menunggu</option>
                     <option value="aktif">Aktif</option>
@@ -2709,18 +3862,48 @@ export function AdminDashboardPage() {
                 </div>
               </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Nama Orang Tua / Wali
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={selectedStudent.parentName}
+                    onChange={(e) =>
+                      setSelectedStudent({ ...selectedStudent, parentName: e.target.value })
+                    }
+                    className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Nomor HP Orang Tua
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={selectedStudent.parentPhone}
+                    onChange={(e) =>
+                      setSelectedStudent({ ...selectedStudent, parentPhone: e.target.value })
+                    }
+                    className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
+                  />
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Nomor HP Orang Tua
+                  Catatan Berkas / Orang Tua (Opsional)
                 </label>
-                <input
-                  type="text"
-                  required
-                  value={selectedStudent.parentPhone}
+                <textarea
+                  rows={2}
+                  value={selectedStudent.notes || ''}
                   onChange={(e) =>
-                    setSelectedStudent({ ...selectedStudent, parentPhone: e.target.value })
+                    setSelectedStudent({ ...selectedStudent, notes: e.target.value })
                   }
-                  className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                  className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
                 />
               </div>
 
@@ -2734,7 +3917,7 @@ export function AdminDashboardPage() {
                   onChange={(e) =>
                     setSelectedStudent({ ...selectedStudent, adminNotes: e.target.value })
                   }
-                  className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-xl"
+                  className="w-full px-3 py-2 text-sm bg-white border border-[#E5E2D9] rounded-lg"
                 />
               </div>
 

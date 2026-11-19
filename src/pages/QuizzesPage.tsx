@@ -107,15 +107,15 @@ function QuizDirectoryPage() {
               className="editorial-card rounded-2xl p-8 text-center max-w-xl mx-auto space-y-3"
             >
               <AlertCircle className="w-8 h-8 text-[#B91C1C] mx-auto" />
-              <p className="text-sm font-semibold text-[#121820]">{error}</p>
+              <p className="text-sm font-semibold text-[#141A23]">{error}</p>
             </div>
           ) : quizzes.length === 0 ? (
             <div className="editorial-card rounded-2xl p-10 text-center max-w-xl mx-auto space-y-3">
               <BookOpen className="w-10 h-10 text-[#626E7E] mx-auto" />
-              <h2 className="font-display text-2xl font-bold text-[#121820]">
+              <h2 className="font-display text-2xl font-bold text-[#141A23]">
                 Belum Ada Kuis Aktif
               </h2>
-              <p className="text-sm text-[#3F4A59] leading-relaxed">
+              <p className="text-sm text-[#3E4856] leading-relaxed">
                 Daftar kuis latihan online akan tampil di halaman ini setelah diterbitkan oleh pengelola TOMOYO Education.
               </p>
             </div>
@@ -129,8 +129,8 @@ function QuizDirectoryPage() {
                     className="editorial-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between gap-6"
                   >
                     <div className="space-y-4">
-                      <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#DFDCD3] text-xs">
-                        <span className="font-semibold text-[#BE123C]">{quiz.targetClass}</span>
+                      <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#E5E2D9] text-xs">
+                        <span className="font-semibold text-[#A61B38]">{quiz.targetClass}</span>
                         <span
                           className={`font-semibold ${
                             avail.available ? 'text-[#15803D]' : 'text-[#B45309]'
@@ -145,28 +145,28 @@ function QuizDirectoryPage() {
                       </div>
 
                       <div className="space-y-2">
-                        <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#121820] leading-tight">
+                        <h2 className="font-display text-2xl sm:text-3xl font-bold text-[#141A23] leading-tight">
                           {quiz.title}
                         </h2>
-                        <p className="text-sm text-[#3F4A59] leading-relaxed">{quiz.description}</p>
+                        <p className="text-sm text-[#3E4856] leading-relaxed">{quiz.description}</p>
                       </div>
 
                       <div className="editorial-card-subtle rounded-xl p-4 grid grid-cols-3 gap-3 text-xs">
                         <div>
                           <p className="text-[#626E7E]">Jumlah Soal</p>
-                          <p className="font-mono font-bold text-sm text-[#121820] tabular-nums mt-0.5">
+                          <p className="font-mono font-bold text-sm text-[#141A23] tabular-nums mt-0.5">
                             {quiz.questionCount} Butir
                           </p>
                         </div>
                         <div>
                           <p className="text-[#626E7E]">Batas Waktu</p>
-                          <p className="font-mono font-bold text-sm text-[#121820] tabular-nums mt-0.5">
+                          <p className="font-mono font-bold text-sm text-[#141A23] tabular-nums mt-0.5">
                             {quiz.timeLimitMinutes > 0 ? `${quiz.timeLimitMinutes} Menit` : 'Bebas'}
                           </p>
                         </div>
                         <div>
                           <p className="text-[#626E7E]">Percobaan</p>
-                          <p className="font-mono font-bold text-sm text-[#121820] tabular-nums mt-0.5">
+                          <p className="font-mono font-bold text-sm text-[#141A23] tabular-nums mt-0.5">
                             {quiz.maxAttempts > 0 ? `Maks. ${quiz.maxAttempts}x` : 'Bebas'}
                           </p>
                         </div>
@@ -179,7 +179,7 @@ function QuizDirectoryPage() {
                       </span>
                       <Link
                         to={`/kuis/${quiz.id}`}
-                        className="inline-flex items-center justify-center gap-2 px-5 py-3 min-h-[44px] text-sm font-semibold text-white bg-[#BE123C] hover:bg-[#9F1239] rounded-xl transition-colors whitespace-nowrap"
+                        className="inline-flex items-center justify-center gap-2 px-5 py-3 min-h-[44px] text-sm font-semibold text-white bg-[#A61B38] hover:bg-[#88132B] rounded-xl transition-colors whitespace-nowrap"
                       >
                         <span>{avail.available ? 'Kerjakan Kuis' : 'Lihat Detail Kuis'}</span>
                         <ArrowRight className="w-4 h-4 shrink-0" />
@@ -372,11 +372,11 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
         <div className="max-w-lg mx-auto px-4">
           <div className="editorial-card rounded-2xl p-8 text-center space-y-4">
             <AlertCircle className="w-10 h-10 text-[#B91C1C] mx-auto" />
-            <h1 className="font-display text-2xl font-bold text-[#121820]">Kuis Tidak Tersedia</h1>
-            <p className="text-sm text-[#3F4A59]">{loadError || 'Kuis tidak ditemukan.'}</p>
+            <h1 className="font-display text-2xl font-bold text-[#141A23]">Kuis Tidak Tersedia</h1>
+            <p className="text-sm text-[#3E4856]">{loadError || 'Kuis tidak ditemukan.'}</p>
             <Link
               to="/kuis"
-              className="inline-flex items-center gap-2 px-5 py-2.5 min-h-[44px] text-sm font-semibold text-white bg-[#121820] hover:bg-[#BE123C] rounded-xl transition-colors"
+              className="inline-flex items-center gap-2 px-5 py-2.5 min-h-[44px] text-sm font-semibold text-white bg-[#141A23] hover:bg-[#A61B38] rounded-xl transition-colors"
             >
               <ArrowLeft className="w-4 h-4" />
               <span>Kembali ke Daftar Kuis</span>
@@ -394,60 +394,60 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
           <button
             type="button"
             onClick={() => navigate('/kuis')}
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#3F4A59] hover:text-[#121820] cursor-pointer"
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#3E4856] hover:text-[#141A23] cursor-pointer"
           >
             <ArrowLeft className="w-4 h-4" />
             <span>Semua Kuis Online</span>
           </button>
-          <span className="text-xs font-semibold text-[#BE123C]">{quiz.targetClass}</span>
+          <span className="text-xs font-semibold text-[#A61B38]">{quiz.targetClass}</span>
         </div>
 
         {/* STAGE 1: STUDENT ENTRY & INSTRUCTIONS */}
         {stage === 'entry' && (
           <div className="editorial-card rounded-2xl p-6 sm:p-8 space-y-6">
-            <div className="space-y-2 border-b border-[#DFDCD3] pb-5">
-              <p className="text-xs font-semibold tracking-wider text-[#BE123C] uppercase">
+            <div className="space-y-2 border-b border-[#E5E2D9] pb-5">
+              <p className="text-xs font-semibold tracking-wider text-[#A61B38] uppercase">
                 Lembar Identitas Siswa
               </p>
-              <h1 className="font-display text-3xl sm:text-4xl font-bold text-[#121820] leading-tight">
+              <h1 className="font-display text-3xl sm:text-4xl font-bold text-[#141A23] leading-tight">
                 {quiz.title}
               </h1>
-              <p className="text-sm sm:text-base text-[#3F4A59] leading-relaxed">{quiz.description}</p>
+              <p className="text-sm sm:text-base text-[#3E4856] leading-relaxed">{quiz.description}</p>
             </div>
 
             <div className="editorial-card-subtle rounded-xl p-4 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
               <div>
                 <p className="text-[#626E7E]">Jumlah Soal</p>
-                <p className="font-mono font-bold text-sm text-[#121820] tabular-nums mt-0.5">
+                <p className="font-mono font-bold text-sm text-[#141A23] tabular-nums mt-0.5">
                   {quiz.questionCount} Soal
                 </p>
               </div>
               <div>
                 <p className="text-[#626E7E]">Durasi</p>
-                <p className="font-mono font-bold text-sm text-[#121820] tabular-nums mt-0.5">
+                <p className="font-mono font-bold text-sm text-[#141A23] tabular-nums mt-0.5">
                   {quiz.timeLimitMinutes > 0 ? `${quiz.timeLimitMinutes} Menit` : 'Tanpa Batas'}
                 </p>
               </div>
               <div>
                 <p className="text-[#626E7E]">Skor Maksimal</p>
-                <p className="font-mono font-bold text-sm text-[#121820] tabular-nums mt-0.5">
+                <p className="font-mono font-bold text-sm text-[#141A23] tabular-nums mt-0.5">
                   {quiz.totalPoints} Poin
                 </p>
               </div>
               <div>
                 <p className="text-[#626E7E]">Batas Percobaan</p>
-                <p className="font-mono font-bold text-sm text-[#121820] tabular-nums mt-0.5">
+                <p className="font-mono font-bold text-sm text-[#141A23] tabular-nums mt-0.5">
                   {quiz.maxAttempts > 0 ? `${quiz.maxAttempts} Kali` : 'Bebas'}
                 </p>
               </div>
             </div>
 
             {quiz.instructions && (
-              <div className="bg-[#EFECE4] border border-[#DFDCD3] rounded-xl p-4 space-y-1.5">
-                <p className="text-xs font-bold text-[#121820] uppercase tracking-wider">
+              <div className="bg-[#F2EFE9] border border-[#E5E2D9] rounded-xl p-4 space-y-1.5">
+                <p className="text-xs font-bold text-[#141A23] uppercase tracking-wider">
                   Petunjuk Pengerjaan
                 </p>
-                <p className="text-sm text-[#3F4A59] leading-relaxed whitespace-pre-line">
+                <p className="text-sm text-[#3E4856] leading-relaxed whitespace-pre-line">
                   {quiz.instructions}
                 </p>
               </div>
@@ -473,7 +473,7 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label htmlFor="quiz-student-name" className="block text-xs font-semibold text-[#121820] mb-1.5">
+                    <label htmlFor="quiz-student-name" className="block text-xs font-semibold text-[#141A23] mb-1.5">
                       Nama Lengkap Siswa *
                     </label>
                     <input
@@ -483,11 +483,11 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
                       value={studentName}
                       onChange={(e) => setStudentName(e.target.value)}
                       placeholder="Contoh: Aisyah Putri"
-                      className="w-full px-3.5 py-2.5 min-h-[46px] text-base sm:text-sm bg-white border border-[#DFDCD3] rounded-xl focus:outline-none focus:border-[#121820]"
+                      className="w-full px-3.5 py-2.5 min-h-[46px] text-base sm:text-sm bg-white border border-[#E5E2D9] rounded-xl focus:outline-none focus:border-[#141A23]"
                     />
                   </div>
                   <div>
-                    <label htmlFor="quiz-student-class" className="block text-xs font-semibold text-[#121820] mb-1.5">
+                    <label htmlFor="quiz-student-class" className="block text-xs font-semibold text-[#141A23] mb-1.5">
                       Kelas *
                     </label>
                     <input
@@ -497,13 +497,13 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
                       value={studentClass}
                       onChange={(e) => setStudentClass(e.target.value)}
                       placeholder="Contoh: Kelas 6 SD"
-                      className="w-full px-3.5 py-2.5 min-h-[46px] text-base sm:text-sm bg-white border border-[#DFDCD3] rounded-xl focus:outline-none focus:border-[#121820]"
+                      className="w-full px-3.5 py-2.5 min-h-[46px] text-base sm:text-sm bg-white border border-[#E5E2D9] rounded-xl focus:outline-none focus:border-[#141A23]"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label htmlFor="quiz-parent-wa" className="block text-xs font-semibold text-[#121820] mb-1.5">
+                  <label htmlFor="quiz-parent-wa" className="block text-xs font-semibold text-[#141A23] mb-1.5">
                     Nomor WhatsApp Orang Tua (Opsional)
                   </label>
                   <input
@@ -512,14 +512,14 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
                     value={parentWhatsapp}
                     onChange={(e) => setParentWhatsapp(e.target.value)}
                     placeholder="Contoh: 082119770700"
-                    className="w-full px-3.5 py-2.5 min-h-[46px] text-base sm:text-sm bg-white border border-[#DFDCD3] rounded-xl focus:outline-none focus:border-[#121820]"
+                    className="w-full px-3.5 py-2.5 min-h-[46px] text-base sm:text-sm bg-white border border-[#E5E2D9] rounded-xl focus:outline-none focus:border-[#141A23]"
                   />
                 </div>
 
                 <button
                   type="submit"
                   disabled={starting}
-                  className="inline-flex items-center justify-center gap-2 w-full sm:w-auto px-6 py-3.5 min-h-[48px] text-sm font-semibold text-white bg-[#BE123C] hover:bg-[#9F1239] rounded-xl transition-colors cursor-pointer disabled:opacity-60"
+                  className="inline-flex items-center justify-center gap-2 w-full sm:w-auto px-6 py-3.5 min-h-[48px] text-sm font-semibold text-white bg-[#A61B38] hover:bg-[#88132B] rounded-xl transition-colors cursor-pointer disabled:opacity-60"
                 >
                   <Play className="w-4 h-4 shrink-0" />
                   <span>{starting ? 'Mempersiapkan Soal...' : 'Mulai Kerjakan Kuis'}</span>
@@ -537,13 +537,13 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
                 <p className="text-xs font-semibold text-[#626E7E] truncate">
                   {studentName} · {studentClass}
                 </p>
-                <p className="text-sm font-bold text-[#121820] truncate">{quiz.title}</p>
+                <p className="text-sm font-bold text-[#141A23] truncate">{quiz.title}</p>
               </div>
 
               <div className="flex items-center gap-4 shrink-0">
                 <div className="text-right text-xs">
                   <p className="text-[#626E7E]">Terjawab</p>
-                  <p className="font-mono font-bold text-[#121820] tabular-nums">
+                  <p className="font-mono font-bold text-[#141A23] tabular-nums">
                     {answeredCount}/{quiz.questions.length}
                   </p>
                 </div>
@@ -553,7 +553,7 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
                     className={`px-3 py-1.5 rounded-xl border font-mono font-bold text-sm tabular-nums flex items-center gap-1.5 ${
                       secondsLeft <= 60
                         ? 'bg-rose-50 border-rose-300 text-[#B91C1C]'
-                        : 'bg-[#EFECE4] border-[#DFDCD3] text-[#121820]'
+                        : 'bg-[#F2EFE9] border-[#E5E2D9] text-[#141A23]'
                     }`}
                   >
                     <Clock className="w-4 h-4 shrink-0" />
@@ -582,7 +582,7 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
                     className="editorial-card rounded-2xl p-5 sm:p-7 space-y-4"
                   >
                     <div className="flex items-center justify-between gap-2 text-xs">
-                      <span className="font-mono font-bold text-[#BE123C] tabular-nums">
+                      <span className="font-mono font-bold text-[#A61B38] tabular-nums">
                         SOAL {String(qIdx + 1).padStart(2, '0')}
                       </span>
                       <span className="font-mono text-[#626E7E] tabular-nums">
@@ -590,7 +590,7 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
                       </span>
                     </div>
 
-                    <h2 className="text-base sm:text-lg font-semibold text-[#121820] leading-relaxed">
+                    <h2 className="text-base sm:text-lg font-semibold text-[#141A23] leading-relaxed">
                       {q.prompt}
                     </h2>
 
@@ -615,15 +615,15 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
                             }}
                             className={`w-full text-left px-4 py-3.5 min-h-[50px] rounded-xl border transition-colors flex items-center gap-3.5 cursor-pointer ${
                               isSelected
-                                ? 'bg-[#121820] text-white border-[#121820]'
-                                : 'bg-white text-[#121820] border-[#DFDCD3] hover:border-[#121820]'
+                                ? 'bg-[#141A23] text-white border-[#141A23]'
+                                : 'bg-white text-[#141A23] border-[#E5E2D9] hover:border-[#141A23]'
                             }`}
                           >
                             <span
                               className={`w-8 h-8 rounded-lg font-mono text-xs font-bold flex items-center justify-center shrink-0 ${
                                 isSelected
-                                  ? 'bg-[#BE123C] text-white'
-                                  : 'bg-[#EFECE4] text-[#121820]'
+                                  ? 'bg-[#A61B38] text-white'
+                                  : 'bg-[#F2EFE9] text-[#141A23]'
                               }`}
                             >
                               {letter}
@@ -651,7 +651,7 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <p className="text-xs text-[#626E7E]">
                   Progress terjawab:{' '}
-                  <span className="font-mono font-bold text-[#121820] tabular-nums">
+                  <span className="font-mono font-bold text-[#141A23] tabular-nums">
                     {answeredCount} dari {quiz.questions.length} soal
                   </span>
                 </p>
@@ -660,7 +660,7 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
                   type="button"
                   disabled={submitting}
                   onClick={handleRequestSubmit}
-                  className="inline-flex items-center justify-center gap-2 px-6 py-3.5 min-h-[48px] text-sm font-semibold text-white bg-[#BE123C] hover:bg-[#9F1239] rounded-xl transition-colors cursor-pointer disabled:opacity-60"
+                  className="inline-flex items-center justify-center gap-2 px-6 py-3.5 min-h-[48px] text-sm font-semibold text-white bg-[#A61B38] hover:bg-[#88132B] rounded-xl transition-colors cursor-pointer disabled:opacity-60"
                 >
                   <Send className="w-4 h-4 shrink-0" />
                   <span>
@@ -679,19 +679,19 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
         {/* STAGE 3: QUIZ RESULT SUMMARY (NO ANSWER KEYS EXPOSED) */}
         {stage === 'result' && result && (
           <div className="editorial-card rounded-2xl p-6 sm:p-8 space-y-6">
-            <div className="flex items-start gap-4 border-b border-[#DFDCD3] pb-5">
-              <div className="w-12 h-12 rounded-xl bg-[#EFECE4] border border-[#DFDCD3] flex items-center justify-center shrink-0">
+            <div className="flex items-start gap-4 border-b border-[#E5E2D9] pb-5">
+              <div className="w-12 h-12 rounded-xl bg-[#F2EFE9] border border-[#E5E2D9] flex items-center justify-center shrink-0">
                 <CheckCircle2 className="w-6 h-6 text-[#15803D]" />
               </div>
               <div className="space-y-1">
                 <p className="text-xs font-semibold tracking-wider text-[#15803D] uppercase">
                   Jawaban Berhasil Dikirim &amp; Dinilai
                 </p>
-                <h1 className="font-display text-3xl font-bold text-[#121820]">
+                <h1 className="font-display text-3xl font-bold text-[#141A23]">
                   {result.quizTitle}
                 </h1>
-                <p className="text-sm text-[#3F4A59]">
-                  Peserta: <span className="font-semibold text-[#121820]">{result.studentName}</span> · {result.studentClass}
+                <p className="text-sm text-[#3E4856]">
+                  Peserta: <span className="font-semibold text-[#141A23]">{result.studentName}</span> · {result.studentClass}
                 </p>
               </div>
             </div>
@@ -699,26 +699,26 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div className="editorial-card-subtle rounded-xl p-4">
                 <p className="text-xs text-[#626E7E]">Skor Akhir</p>
-                <p className="font-mono text-2xl font-bold text-[#121820] tabular-nums mt-1">
+                <p className="font-mono text-2xl font-bold text-[#141A23] tabular-nums mt-1">
                   {result.score} <span className="text-sm font-normal text-[#626E7E]">/ {result.maxScore}</span>
                 </p>
               </div>
               <div className="editorial-card-subtle rounded-xl p-4">
                 <p className="text-xs text-[#626E7E]">Persentase</p>
-                <p className="font-mono text-2xl font-bold text-[#BE123C] tabular-nums mt-1">
+                <p className="font-mono text-2xl font-bold text-[#A61B38] tabular-nums mt-1">
                   {result.percentage}%
                 </p>
               </div>
               <div className="editorial-card-subtle rounded-xl p-4">
                 <p className="text-xs text-[#626E7E]">Benar / Salah</p>
-                <p className="font-mono text-xl font-bold text-[#121820] tabular-nums mt-1">
+                <p className="font-mono text-xl font-bold text-[#141A23] tabular-nums mt-1">
                   <span className="text-[#15803D]">{result.correctCount}</span> /{' '}
                   <span className="text-[#B91C1C]">{result.wrongCount}</span>
                 </p>
               </div>
               <div className="editorial-card-subtle rounded-xl p-4">
                 <p className="text-xs text-[#626E7E]">Durasi</p>
-                <p className="font-mono text-xl font-bold text-[#121820] tabular-nums mt-1">
+                <p className="font-mono text-xl font-bold text-[#141A23] tabular-nums mt-1">
                   {formatCountdown(result.durationSeconds)}
                 </p>
               </div>
@@ -731,7 +731,7 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
             <div className="flex flex-wrap items-center gap-3 pt-2">
               <Link
                 to="/kuis"
-                className="inline-flex items-center justify-center gap-2 px-5 py-3 min-h-[44px] text-sm font-semibold text-white bg-[#121820] hover:bg-[#BE123C] rounded-xl transition-colors"
+                className="inline-flex items-center justify-center gap-2 px-5 py-3 min-h-[44px] text-sm font-semibold text-white bg-[#141A23] hover:bg-[#A61B38] rounded-xl transition-colors"
               >
                 <ArrowLeft className="w-4 h-4" />
                 <span>Daftar Kuis Lainnya</span>
@@ -745,7 +745,7 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
                   setAnswers({});
                   setStartError(null);
                 }}
-                className="inline-flex items-center justify-center gap-2 px-5 py-3 min-h-[44px] text-sm font-semibold text-[#121820] bg-white border border-[#DFDCD3] hover:border-[#121820] rounded-xl transition-colors cursor-pointer"
+                className="inline-flex items-center justify-center gap-2 px-5 py-3 min-h-[44px] text-sm font-semibold text-[#141A23] bg-white border border-[#E5E2D9] hover:border-[#141A23] rounded-xl transition-colors cursor-pointer"
               >
                 <RotateCcw className="w-4 h-4" />
                 <span>Kerjakan Ulang</span>

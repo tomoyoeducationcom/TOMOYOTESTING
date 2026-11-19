@@ -11,8 +11,8 @@ export function BatikPaomanDivider({
   tone?: 'light' | 'dark';
   className?: string;
 }) {
-  const strokeColor = tone === 'dark' ? 'rgba(217, 249, 157, 0.28)' : 'rgba(18, 24, 32, 0.16)';
-  const accentColor = tone === 'dark' ? 'rgba(217, 249, 157, 0.45)' : 'rgba(190, 18, 60, 0.35)';
+  const strokeColor = tone === 'dark' ? 'rgba(229, 226, 217, 0.22)' : 'rgba(20, 26, 35, 0.14)';
+  const accentColor = tone === 'dark' ? 'rgba(245, 196, 120, 0.55)' : 'rgba(166, 27, 56, 0.35)';
 
   return (
     <div
@@ -94,7 +94,7 @@ export function PagePhotoHero({
   children?: React.ReactNode;
 }) {
   return (
-    <section className="relative overflow-hidden bg-[#121820] text-white border-b border-[#DFDCD3]">
+    <section className="relative overflow-hidden bg-[#141A23] text-white border-b border-[#E5E2D9]">
       <img
         src={imageSrc}
         alt={imageAlt}
@@ -104,10 +104,10 @@ export function PagePhotoHero({
       <div className="subhero-scrim absolute inset-0" aria-hidden="true" />
       <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14 sm:py-20 lg:py-24">
         <div className="max-w-3xl space-y-3.5">
-          <p className="text-xs sm:text-sm font-semibold tracking-[0.16em] uppercase text-[#D9F99D]">
+          <p className="text-xs font-semibold tracking-[0.16em] uppercase text-[#FDE68A]">
             {eyebrow}
           </p>
-          <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.02] text-white">
+          <h1 className="font-display text-3xl sm:text-5xl lg:text-[3.25rem] font-bold tracking-tight leading-[1.08] text-white">
             {title}
           </h1>
           <p className="text-sm sm:text-base lg:text-lg text-slate-100/90 leading-relaxed max-w-2xl">

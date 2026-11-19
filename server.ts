@@ -26,6 +26,7 @@ import {
   verifyRequestFirebaseTokenDetailed,
 } from './src/server/auth';
 import {
+  checkFonnteDeviceStatus,
   confirmDueReminder,
   isFonnteConfigured,
   listDueReminders,
@@ -250,6 +251,7 @@ export function createApp() {
       initialPaymentStatus?: PaymentStatus;
       registeredAtIso?: string;
       nextDueAtIso?: string;
+      channel?: 'offline' | 'migration';
     };
 
     const registrationId = (body.registrationId || '').trim();
@@ -283,6 +285,8 @@ export function createApp() {
       billingAmount: typeof body.billingAmount === 'number' ? body.billingAmount : null,
     });
 
+    const channel = body.channel === 'migration' ? 'migration' : 'offline';
+
     const message = buildRegistrationNotificationMessage({
       parentName,
       parentPhone,
@@ -293,7 +297,7 @@ export function createApp() {
       branchName,
       billingAmount: typeof body.billingAmount === 'number' ? body.billingAmount : null,
       nextDueAtIso,
-      channel: 'offline',
+      channel,
       paymentStatusLabel: body.initialPaymentStatus
         ? getPaymentStatusLabel(body.initialPaymentStatus)
         : undefined,
@@ -482,6 +486,20 @@ export function createApp() {
       ...delivery,
       messagePreview: message.slice(0, 480),
     });
+  });
+
+  app.get('/api/admin/fonnte/device', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded) {
+      res.status(401).json({ error: 'Token Firebase tidak valid.' });
+      return;
+    }
+    if (!isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Akses ditolak. Khusus akun admin terotorisasi.' });
+      return;
+    }
+    const status = await checkFonnteDeviceStatus();
+    res.json(status);
   });
 
   // ============================================================================

@@ -47,9 +47,32 @@ function persistKey(key: string) {
   writeJsonData(IDEMPOTENCY_FILENAME, items);
 }
 
+export function sanitizeFonnteToken(raw: unknown): string {
+  if (typeof raw !== 'string') return '';
+  let cleaned = raw.trim();
+  if (
+    (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+    (cleaned.startsWith("'") && cleaned.endsWith("'"))
+  ) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+  cleaned = cleaned.replace(/^Bearer\s+/i, '').trim();
+  return cleaned;
+}
+
+export function formatFonnteFailureDetail(rawDetail: string): string {
+  const clean = rawDetail.trim();
+  if (/unknown\s+token/i.test(clean)) {
+    return `unknown token — Token device Fonnte ditolak oleh api.fonnte.com. Pastikan environment variable FONNTE_TOKEN di Vercel (scope Production) diisi dengan Device Token resmi untuk nomor 083121902760 (${FONNTE_SENDER_NUMBER}) — bukan Account Token — tanpa tanda kutip/spasi, lalu lakukan Redeploy tanpa cache.`;
+  }
+  if (/disconnect|not\s+connected|device\s+not\s+ready/i.test(clean)) {
+    return `${clean} — Perangkat WhatsApp ${FONNTE_SENDER_NUMBER} di dashboard Fonnte sedang terputus; silakan scan ulang QR WhatsApp di Fonnte.`;
+  }
+  return clean;
+}
+
 export function isFonnteConfigured(): boolean {
-  const token = process.env.FONNTE_TOKEN;
-  return typeof token === 'string' && token.trim().length > 0;
+  return sanitizeFonnteToken(process.env.FONNTE_TOKEN).length > 0;
 }
 
 export function hasIdempotencyKey(key: string): boolean {
@@ -63,7 +86,7 @@ export async function sendFonnteWhatsApp(params: {
   scheduleTimestampSec?: number;
 }): Promise<FonnteDeliveryResult> {
   const target = params.target || ADMIN_WHATSAPP_TARGET;
-  const token = process.env.FONNTE_TOKEN?.trim();
+  const token = sanitizeFonnteToken(process.env.FONNTE_TOKEN);
 
   if (!token) {
     return {
@@ -129,10 +152,11 @@ export async function sendFonnteWhatsApp(params: {
         };
       }
 
-      lastError =
+      const rawError =
         parsed?.reason ||
         parsed?.detail ||
         `Fonnte merespons HTTP ${response.status} dengan status gagal.`;
+      lastError = formatFonnteFailureDetail(rawError);
 
       if (response.status < 500) {
         break;
@@ -155,11 +179,14 @@ export async function checkFonnteDeviceStatus(): Promise<{
   configured: boolean;
   connected: boolean;
   senderNumber: string;
+  deviceNumber?: string;
+  deviceName?: string;
   detail: string;
   deviceStatus?: string;
   quota?: string;
+  tokenLength?: number;
 }> {
-  const token = process.env.FONNTE_TOKEN?.trim();
+  const token = sanitizeFonnteToken(process.env.FONNTE_TOKEN);
   if (!token) {
     return {
       configured: false,
@@ -180,6 +207,8 @@ export async function checkFonnteDeviceStatus(): Promise<{
     const text = await response.text();
     let parsed: {
       status?: boolean;
+      device?: string;
+      name?: string;
       device_status?: string;
       quota?: string;
       reason?: string;
@@ -198,25 +227,31 @@ export async function checkFonnteDeviceStatus(): Promise<{
         configured: true,
         connected,
         senderNumber: FONNTE_SENDER_NUMBER,
+        deviceNumber: parsed.device ? String(parsed.device) : undefined,
+        deviceName: parsed.name ? String(parsed.name) : undefined,
         deviceStatus: devStatus,
         quota: parsed.quota ? String(parsed.quota) : undefined,
+        tokenLength: token.length,
         detail: connected
-          ? `Perangkat Fonnte terhubung (${devStatus}).`
+          ? `Perangkat Fonnte terhubung (${devStatus})${parsed.device ? ` — Nomor terdaftar: ${parsed.device}` : ''}.`
           : `Perangkat Fonnte berstatus: ${devStatus}.`,
       };
     }
 
+    const rawErr = parsed?.reason || parsed?.detail || `HTTP ${response.status} dari Fonnte device check.`;
     return {
       configured: true,
       connected: false,
       senderNumber: FONNTE_SENDER_NUMBER,
-      detail: parsed?.reason || parsed?.detail || `HTTP ${response.status} dari Fonnte device check.`,
+      tokenLength: token.length,
+      detail: formatFonnteFailureDetail(rawErr),
     };
   } catch (err) {
     return {
       configured: true,
       connected: false,
       senderNumber: FONNTE_SENDER_NUMBER,
+      tokenLength: token.length,
       detail: err instanceof Error ? err.message : 'Gagal mengecek status perangkat Fonnte.',
     };
   }
@@ -227,7 +262,7 @@ export async function fetchFonnteGroupRefresh(): Promise<{
   configured: boolean;
   detail: string;
 }> {
-  const token = process.env.FONNTE_TOKEN?.trim();
+  const token = sanitizeFonnteToken(process.env.FONNTE_TOKEN);
   if (!token) {
     return {
       ok: false,
@@ -261,7 +296,9 @@ export async function fetchFonnteGroupRefresh(): Promise<{
     return {
       ok: false,
       configured: true,
-      detail: parsed?.reason || parsed?.detail || `Gagal fetch-group Fonnte (HTTP ${response.status}).`,
+      detail: formatFonnteFailureDetail(
+        parsed?.reason || parsed?.detail || `Gagal fetch-group Fonnte (HTTP ${response.status}).`
+      ),
     };
   } catch (err) {
     return {
@@ -278,7 +315,7 @@ export async function getFonnteWhatsappGroups(): Promise<{
   detail: string;
   groups: Array<{ id: string; name: string }>;
 }> {
-  const token = process.env.FONNTE_TOKEN?.trim();
+  const token = sanitizeFonnteToken(process.env.FONNTE_TOKEN);
   if (!token) {
     return {
       ok: false,
@@ -333,7 +370,9 @@ export async function getFonnteWhatsappGroups(): Promise<{
     return {
       ok: false,
       configured: true,
-      detail: parsed?.reason || parsed?.detail || `Gagal mengambil grup (HTTP ${response.status}).`,
+      detail: formatFonnteFailureDetail(
+        parsed?.reason || parsed?.detail || `Gagal mengambil grup (HTTP ${response.status}).`
+      ),
       groups: [],
     };
   } catch (err) {

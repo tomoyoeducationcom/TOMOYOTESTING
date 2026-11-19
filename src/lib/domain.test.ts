@@ -7,9 +7,12 @@ import {
   INITIAL_PACKAGES,
   INITIAL_TEACHERS,
   LearningPackage,
+  StudentRecord,
   buildPaymentDueNotificationMessage,
   buildRegistrationNotificationMessage,
   computeNextMonthlyDueDate,
+  filterAndSplitStudentsByBranch,
+  formatIndonesianDate,
   formatRupiah,
   getPackagePriceDisplayForBranch,
   getPackagePriceForBranch,
@@ -17,6 +20,9 @@ import {
   isPaymentDueNow,
   normalizeWhatsappPhone,
   parseRupiahAmount,
+  parseStudentArchiveMeta,
+  serializeArchiveMetaNotes,
+  validateLegacyMigrationDraft,
   validateMultiChildSubmission,
   validateOfflineRegistrationDraft,
 } from './domain';
@@ -244,6 +250,17 @@ test('phone normalization and Fonnte registration & due-date WhatsApp message fo
   assert.ok(regMsg.includes('PENDAFTARAN SISWA BARU — TOMOYO EDUCATION'));
   assert.ok(regMsg.includes('https://example.vercel.app/admintomoyo'));
 
+  const migMsg = buildRegistrationNotificationMessage({
+    parentName: 'Ibu Darsiti',
+    childName: 'Nanda',
+    gradeLevel: 'Kelas 5 SD',
+    packageName: 'PAKET 2: Kelas 2 – Kelas 5',
+    branchName: 'TOMOYO EDUCATION KECAMATAN TERISI (CABANG)',
+    channel: 'migration',
+    appUrl: 'https://example.vercel.app/',
+  });
+  assert.ok(migMsg.includes('PINDAH DATA SISWA LAMA (ARSIP)'));
+
   const dueMsg = buildPaymentDueNotificationMessage({
     childName: 'Budi',
     parentName: 'Ibu Sari',
@@ -326,5 +343,155 @@ test('formatFirebaseAuthError surfaces unauthorized hostname and translates comm
   const closed = formatFirebaseAuthError({ code: 'auth/popup-closed-by-user' });
   assert.equal(closed.unauthorizedDomain, null);
   assert.ok(closed.message.includes('ditutup'));
+});
+
+test('sanitizeFonnteToken cleans quotes, Bearer prefix, and whitespace; formats unknown token guidance', async () => {
+  const { sanitizeFonnteToken, formatFonnteFailureDetail } = await import('../server/fonnte');
+
+  assert.equal(sanitizeFonnteToken('  "abc123token"\n'), 'abc123token');
+  assert.equal(sanitizeFonnteToken("  'xyz-token' "), 'xyz-token');
+  assert.equal(sanitizeFonnteToken('Bearer my_device_token_99'), 'my_device_token_99');
+  assert.equal(sanitizeFonnteToken(undefined), '');
+  assert.equal(sanitizeFonnteToken('   '), '');
+
+  const guided = formatFonnteFailureDetail('unknown token');
+  assert.ok(guided.includes('083121902760'));
+  assert.ok(guided.includes('Device Token'));
+});
+
+test('legacy student archive migration validation, metadata round-trip, Indonesian date, and Pusat/Cabang branch split', () => {
+  assert.equal(formatIndonesianDate('2016-05-14'), '14 Mei 2016');
+  assert.equal(formatIndonesianDate(''), '-');
+
+  const invalid = validateLegacyMigrationDraft({
+    parentName: 'A',
+    parentPhone: '0812',
+    childName: '',
+    birthDate: '2099-01-01',
+    childPhotoUrl: 'ftp://invalid',
+    childGender: 'Laki-laki',
+    gradeLevel: '',
+    packageId: 'paket-1',
+    branchId: 'indramayu-kota',
+    registeredAtLocal: '',
+    billingAmount: '',
+    initialPaymentStatus: 'lunas',
+    paymentMethod: 'Tunai',
+    academicStatus: 'aktif',
+  });
+  assert.equal(invalid.valid, false);
+  assert.ok(invalid.errors.length >= 6);
+
+  // Photo is optional for legacy paper binder archives lacking a photo
+  const validWithoutPhoto = validateLegacyMigrationDraft({
+    parentName: 'Ibu Kartini',
+    parentPhone: '081312345678',
+    childName: 'Dimas Saputra',
+    birthDate: '2016-08-17',
+    childPhotoUrl: '',
+    childGender: 'Laki-laki',
+    gradeLevel: 'Kelas 4 SD',
+    schoolOrigin: 'SDN Paoman 1 Indramayu',
+    studentAddress: 'Jl. Veteran No. 12, Indramayu',
+    packageId: 'paket-2',
+    branchId: 'indramayu-kota',
+    registeredAtLocal: '2025-07-10T14:00',
+    billingAmount: 250000,
+    initialPaymentStatus: 'lunas',
+    paymentMethod: 'Tunai',
+    academicStatus: 'aktif',
+    notes: 'Pindahan buku induk 2025',
+  });
+  assert.equal(validWithoutPhoto.valid, true);
+
+  const encodedNotes = serializeArchiveMetaNotes({
+    birthDate: '2016-08-17',
+    schoolOrigin: 'SDN Paoman 1 Indramayu',
+    studentAddress: 'Jl. Veteran No. 12',
+    userNotes: 'Pindahan buku induk 2025',
+    isArchive: true,
+  });
+  assert.ok(encodedNotes.includes('[ARSIP:'));
+
+  const parsedFallback = parseStudentArchiveMeta({
+    registrationChannel: 'offline',
+    notes: encodedNotes,
+  });
+  assert.equal(parsedFallback.isMigration, true);
+  assert.equal(parsedFallback.birthDate, '2016-08-17');
+  assert.equal(parsedFallback.schoolOrigin, 'SDN Paoman 1 Indramayu');
+  assert.equal(parsedFallback.studentAddress, 'Jl. Veteran No. 12');
+  assert.equal(parsedFallback.cleanNotes, 'Pindahan buku induk 2025');
+
+  const sampleStudents: StudentRecord[] = [
+    {
+      id: 's1',
+      parentId: 'p1',
+      parentName: 'Ibu Sari',
+      parentEmail: 'sari@example.com',
+      parentPhone: '08111111111',
+      childName: 'Aldo Wijaya',
+      gradeLevel: 'Kelas 1',
+      packageId: 'paket-1',
+      packageName: 'PAKET 1',
+      branchId: 'indramayu-kota',
+      branchName: 'PUSAT',
+      registrationChannel: 'online',
+      status: 'approved',
+      academicStatus: 'aktif',
+    },
+    {
+      id: 's2',
+      parentId: 'legacy_archive',
+      parentName: 'Pak Tarno',
+      parentEmail: '',
+      parentPhone: '08222222222',
+      childName: 'Dimas Saputra',
+      gradeLevel: 'Kelas 4',
+      packageId: 'paket-2',
+      packageName: 'PAKET 2',
+      branchId: 'terisi',
+      branchName: 'CABANG TERISI',
+      registrationChannel: 'offline',
+      notes: encodedNotes,
+      status: 'approved',
+      academicStatus: 'aktif',
+    },
+    {
+      id: 's3',
+      parentId: 'legacy_archive',
+      parentName: 'Ibu Wati',
+      parentEmail: '',
+      parentPhone: '08333333333',
+      childName: 'Nadia Putri',
+      schoolOrigin: 'SDN Karangmalang',
+      gradeLevel: 'Kelas 6',
+      packageId: 'paket-3',
+      packageName: 'PAKET 3',
+      branchId: 'indramayu-kota',
+      branchName: 'PUSAT',
+      registrationChannel: 'migration',
+      status: 'approved',
+      academicStatus: 'aktif',
+    },
+  ];
+
+  const allSplit = filterAndSplitStudentsByBranch(sampleStudents, {});
+  assert.equal(allSplit.filtered.length, 3);
+  assert.equal(allSplit.pusat.length, 2);
+  assert.equal(allSplit.cabang.length, 1);
+
+  const onlyMigrations = filterAndSplitStudentsByBranch(sampleStudents, {
+    channelFilter: 'migration',
+  });
+  assert.equal(onlyMigrations.filtered.length, 2);
+  assert.equal(onlyMigrations.pusat.length, 1);
+  assert.equal(onlyMigrations.cabang.length, 1);
+
+  const bySchoolSearch = filterAndSplitStudentsByBranch(sampleStudents, {
+    searchQuery: 'paoman',
+  });
+  assert.equal(bySchoolSearch.filtered.length, 1);
+  assert.equal(bySchoolSearch.filtered[0].id, 's2');
 });
 

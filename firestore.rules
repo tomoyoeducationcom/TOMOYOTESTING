@@ -54,7 +54,8 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'parentId', 'parentName', 'parentEmail', 'parentPhone',
-          'childName', 'childPhotoUrl', 'childGender', 'gradeLevel', 'packageId', 'packageName',
+          'childName', 'birthDate', 'schoolOrigin', 'studentAddress',
+          'childPhotoUrl', 'childGender', 'gradeLevel', 'packageId', 'packageName',
           'branchId', 'branchName', 'registrationChannel', 'billingAmount', 'initialPaymentStatus',
           'registeredAtIso', 'nextDueAtIso', 'lastDueNotifiedIso', 'dueConfirmedIso',
           'status', 'academicStatus', 'notes', 'adminNotes', 'createdAt', 'updatedAt'
@@ -64,14 +65,17 @@ service cloud.firestore {
         && data.parentEmail is string && data.parentEmail.size() <= 160
         && data.parentPhone is string && data.parentPhone.size() >= 8 && data.parentPhone.size() <= 30
         && data.childName is string && data.childName.size() >= 2 && data.childName.size() <= 120
+        && (!('birthDate' in data) || (data.birthDate is string && data.birthDate.size() <= 20))
+        && (!('schoolOrigin' in data) || (data.schoolOrigin is string && data.schoolOrigin.size() <= 120))
+        && (!('studentAddress' in data) || (data.studentAddress is string && data.studentAddress.size() <= 250))
         && (!('childPhotoUrl' in data) || (data.childPhotoUrl is string && data.childPhotoUrl.size() <= 500))
         && (!('childGender' in data) || data.childGender in ['Laki-laki', 'Perempuan'])
-        && data.gradeLevel is string && data.gradeLevel.size() >= 2 && data.gradeLevel.size() <= 60
+        && data.gradeLevel is string && data.gradeLevel.size() >= 1 && data.gradeLevel.size() <= 60
         && data.packageId in ['paket-1', 'paket-2', 'paket-3']
         && data.packageName is string && data.packageName.size() >= 2 && data.packageName.size() <= 120
         && data.branchId in ['indramayu-kota', 'terisi']
         && data.branchName is string && data.branchName.size() >= 2 && data.branchName.size() <= 120
-        && (!('registrationChannel' in data) || data.registrationChannel in ['online', 'offline'])
+        && (!('registrationChannel' in data) || data.registrationChannel in ['online', 'offline', 'migration'])
         && (!('billingAmount' in data) || (data.billingAmount is number && data.billingAmount >= 0))
         && (!('initialPaymentStatus' in data) || data.initialPaymentStatus in ['lunas', 'cicilan', 'belum_bayar'])
         && (!('registeredAtIso' in data) || (data.registeredAtIso is string && data.registeredAtIso.size() <= 50))
@@ -372,10 +376,11 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && (
           (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
-            'childName', 'childPhotoUrl', 'childGender', 'gradeLevel', 'packageId', 'packageName',
+            'childName', 'birthDate', 'schoolOrigin', 'studentAddress',
+            'childPhotoUrl', 'childGender', 'gradeLevel', 'packageId', 'packageName',
             'branchId', 'branchName', 'billingAmount', 'initialPaymentStatus',
             'registeredAtIso', 'nextDueAtIso', 'lastDueNotifiedIso', 'dueConfirmedIso',
-            'status', 'academicStatus', 'parentPhone', 'notes', 'adminNotes', 'updatedAt'
+            'status', 'academicStatus', 'parentName', 'parentPhone', 'notes', 'adminNotes', 'updatedAt'
           ])) ||
           (isSignedIn()
             && existing().parentId == request.auth.uid

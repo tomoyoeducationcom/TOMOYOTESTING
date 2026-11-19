@@ -30,6 +30,7 @@ import {
   INITIAL_PACKAGES,
   INITIAL_TEACHERS,
   LearningPackage,
+  LegacyStudentMigrationDraft,
   NotificationLogRecord,
   NotificationType,
   OfflineRegistrationDraft,
@@ -43,6 +44,7 @@ import {
   TeacherProfile,
   computeNextMonthlyDueDate,
   getPackagePriceForBranch,
+  serializeArchiveMetaNotes,
 } from './domain';
 import { db, handleFirestoreError, OperationType } from './firebase';
 
@@ -775,6 +777,238 @@ export async function adminCreateOfflineStudent(params: {
   };
 }
 
+export async function adminCreateMigratedStudent(params: {
+  draft: LegacyStudentMigrationDraft;
+  packages: LearningPackage[];
+  branches: BranchLocation[];
+  adminUid: string;
+  idToken: string;
+}): Promise<{
+  studentId: string;
+  paymentId: string;
+  usedLegacyRulesFallback: boolean;
+  waStatus?: 'sent' | 'failed' | 'unconfigured' | 'skipped_duplicate';
+  waDetail?: string;
+  nextDueAtIso: string;
+}> {
+  const { draft, packages, branches, adminUid, idToken } = params;
+  const pkg =
+    packages.find((p) => p.slug === draft.packageId) ||
+    INITIAL_PACKAGES.find((p) => p.slug === draft.packageId) ||
+    INITIAL_PACKAGES[0];
+  const branch =
+    branches.find((b) => b.slug === draft.branchId) ||
+    INITIAL_BRANCHES.find((b) => b.slug === draft.branchId) ||
+    INITIAL_BRANCHES[0];
+
+  const baseDate =
+    draft.registeredAtLocal && !Number.isNaN(new Date(draft.registeredAtLocal).getTime())
+      ? new Date(draft.registeredAtLocal)
+      : new Date();
+  const registeredAtIso = baseDate.toISOString();
+  const nextDueDate =
+    draft.nextDueAtLocal && !Number.isNaN(new Date(draft.nextDueAtLocal).getTime())
+      ? new Date(draft.nextDueAtLocal)
+      : computeNextMonthlyDueDate(baseDate);
+  const nextDueAtIso = nextDueDate.toISOString();
+  const billingAmount = Math.max(0, Number(draft.billingAmount) || 0);
+  const packageName = `${pkg.title} (${pkg.programType})`.slice(0, 120);
+  const cleanGrade =
+    draft.gradeLevel.trim().length === 1
+      ? `Kelas ${draft.gradeLevel.trim()}`
+      : draft.gradeLevel.trim().slice(0, 60);
+
+  const studentRef = doc(collection(db, 'students'));
+  const paymentRef = doc(collection(db, 'payments'));
+
+  const structuredNotes = serializeArchiveMetaNotes({
+    birthDate: draft.birthDate,
+    schoolOrigin: draft.schoolOrigin,
+    studentAddress: draft.studentAddress,
+    userNotes: draft.notes,
+    isArchive: true,
+  });
+
+  const modernStudentPayload: Record<string, unknown> = {
+    parentId: 'legacy_archive',
+    parentName: draft.parentName.trim().slice(0, 120),
+    parentEmail: '',
+    parentPhone: draft.parentPhone.trim().slice(0, 30),
+    childName: draft.childName.trim().slice(0, 120),
+    childGender: draft.childGender,
+    gradeLevel: cleanGrade,
+    packageId: pkg.slug,
+    packageName,
+    branchId: branch.slug,
+    branchName: branch.name.slice(0, 120),
+    registrationChannel: 'migration',
+    billingAmount,
+    initialPaymentStatus: draft.initialPaymentStatus,
+    registeredAtIso,
+    nextDueAtIso,
+    status: 'approved' satisfies RegistrationStatus,
+    academicStatus: draft.academicStatus || ('aktif' satisfies AcademicStatus),
+    notes: structuredNotes || '[ARSIP]',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+
+  if (draft.childPhotoUrl.trim()) {
+    modernStudentPayload.childPhotoUrl = draft.childPhotoUrl.trim().slice(0, 500);
+  }
+  if (draft.birthDate.trim()) {
+    modernStudentPayload.birthDate = draft.birthDate.trim().slice(0, 20);
+  }
+  if (draft.schoolOrigin?.trim()) {
+    modernStudentPayload.schoolOrigin = draft.schoolOrigin.trim().slice(0, 120);
+  }
+  if (draft.studentAddress?.trim()) {
+    modernStudentPayload.studentAddress = draft.studentAddress.trim().slice(0, 250);
+  }
+
+  const periodMonthYear = baseDate.toLocaleDateString('id-ID', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'Asia/Jakarta',
+  });
+
+  const paymentPayload: Record<string, unknown> = {
+    studentId: studentRef.id,
+    parentId: 'legacy_archive',
+    childName: draft.childName.trim().slice(0, 120),
+    amount: billingAmount,
+    method: (draft.paymentMethod || 'Tunai').trim().slice(0, 60),
+    periodLabel: (
+      draft.paymentPeriodLabel?.trim() || `Pindah Data Arsip (${periodMonthYear})`
+    ).slice(0, 80),
+    dueDateIso: nextDueAtIso,
+    status: draft.initialPaymentStatus,
+    notes: (
+      draft.notes?.trim() ||
+      `Migrasi berkas lama (Masuk: ${baseDate.toLocaleDateString('id-ID')})`
+    ).slice(0, 500),
+    recordedBy: adminUid,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+
+  let usedLegacyRulesFallback = false;
+  try {
+    const batch = writeBatch(db);
+    batch.set(studentRef, modernStudentPayload);
+    batch.set(paymentRef, paymentPayload);
+    await batch.commit();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const isPermError =
+      msg.toLowerCase().includes('permission') ||
+      (typeof err === 'object' && err !== null && 'code' in err && (err as { code?: string }).code === 'permission-denied');
+    if (!isPermError) {
+      handleFirestoreError(err, OperationType.CREATE, 'students');
+    }
+
+    // Backward-compatible write if live Firestore project still runs rules without birthDate/migration keys
+    usedLegacyRulesFallback = true;
+    const compatStudentPayload: Record<string, unknown> = {
+      parentId: 'legacy_archive',
+      parentName: draft.parentName.trim().slice(0, 120),
+      parentEmail: '',
+      parentPhone: draft.parentPhone.trim().slice(0, 30),
+      childName: draft.childName.trim().slice(0, 120),
+      childGender: draft.childGender,
+      gradeLevel: cleanGrade,
+      packageId: pkg.slug,
+      packageName,
+      branchId: branch.slug,
+      branchName: branch.name.slice(0, 120),
+      registrationChannel: 'offline',
+      billingAmount,
+      initialPaymentStatus: draft.initialPaymentStatus,
+      registeredAtIso,
+      nextDueAtIso,
+      status: 'approved' satisfies RegistrationStatus,
+      academicStatus: draft.academicStatus || ('aktif' satisfies AcademicStatus),
+      notes: structuredNotes || '[ARSIP]',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+    if (draft.childPhotoUrl.trim()) {
+      compatStudentPayload.childPhotoUrl = draft.childPhotoUrl.trim().slice(0, 500);
+    }
+
+    try {
+      const fallbackBatch = writeBatch(db);
+      fallbackBatch.set(studentRef, compatStudentPayload);
+      fallbackBatch.set(paymentRef, paymentPayload);
+      await fallbackBatch.commit();
+    } catch (fallbackErr) {
+      handleFirestoreError(fallbackErr, OperationType.CREATE, 'students');
+    }
+  }
+
+  let waStatus: 'sent' | 'failed' | 'unconfigured' | 'skipped_duplicate' | undefined;
+  let waDetail: string | undefined;
+
+  if (draft.notifyWhatsappOnSave) {
+    try {
+      const resp = await fetch('/api/admin/notify/offline-registration', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Firebase-Token': idToken,
+        },
+        body: JSON.stringify({
+          registrationId: studentRef.id,
+          parentId: 'legacy_archive',
+          parentName: draft.parentName.trim(),
+          parentPhone: draft.parentPhone.trim(),
+          childName: draft.childName.trim(),
+          childGender: draft.childGender,
+          gradeLevel: cleanGrade,
+          packageName,
+          branchName: branch.name,
+          billingAmount,
+          initialPaymentStatus: draft.initialPaymentStatus,
+          registeredAtIso,
+          nextDueAtIso,
+          channel: 'migration',
+        }),
+      });
+      if (resp.ok) {
+        const json = (await resp.json()) as {
+          status?: 'sent' | 'failed' | 'unconfigured' | 'skipped_duplicate';
+          detail?: string;
+          target?: string;
+          messagePreview?: string;
+        };
+        waStatus = json.status || 'failed';
+        waDetail = json.detail;
+        await adminCreateNotificationLog({
+          registrationId: studentRef.id,
+          parentId: 'legacy_archive',
+          type: 'offline_registration',
+          target: json.target || ADMIN_WHATSAPP_TARGET,
+          status: waStatus,
+          messagePreview: json.messagePreview || `Pindah data arsip ${draft.childName}`,
+          providerDetail: json.detail || '',
+        });
+      }
+    } catch (waErr) {
+      waStatus = 'failed';
+      waDetail = waErr instanceof Error ? waErr.message : 'Gagal mengirim WA.';
+    }
+  }
+
+  return {
+    studentId: studentRef.id,
+    paymentId: paymentRef.id,
+    usedLegacyRulesFallback,
+    waStatus,
+    waDetail,
+    nextDueAtIso,
+  };
+}
+
 export async function adminCreateNotificationLog(entry: {
   registrationId: string;
   parentId: string;
@@ -890,6 +1124,9 @@ export async function adminUpdateStudent(
   studentId: string,
   updates: Partial<{
     childName: string;
+    birthDate: string;
+    schoolOrigin: string;
+    studentAddress: string;
     childPhotoUrl: string;
     childGender: ChildGender;
     gradeLevel: string;
@@ -903,38 +1140,77 @@ export async function adminUpdateStudent(
     nextDueAtIso: string;
     status: RegistrationStatus;
     academicStatus: AcademicStatus;
+    parentName: string;
     parentPhone: string;
+    notes: string;
     adminNotes: string;
   }>
 ) {
   const path = `students/${studentId}`;
+  const clean: Record<string, unknown> = { updatedAt: serverTimestamp() };
+  if (updates.childName !== undefined) clean.childName = updates.childName.trim().slice(0, 120);
+  if (updates.birthDate !== undefined && updates.birthDate.trim()) {
+    clean.birthDate = updates.birthDate.trim().slice(0, 20);
+  }
+  if (updates.schoolOrigin !== undefined && updates.schoolOrigin.trim()) {
+    clean.schoolOrigin = updates.schoolOrigin.trim().slice(0, 120);
+  }
+  if (updates.studentAddress !== undefined && updates.studentAddress.trim()) {
+    clean.studentAddress = updates.studentAddress.trim().slice(0, 250);
+  }
+  if (updates.childPhotoUrl !== undefined)
+    clean.childPhotoUrl = updates.childPhotoUrl.trim().slice(0, 500);
+  if (updates.childGender !== undefined) clean.childGender = updates.childGender;
+  if (updates.gradeLevel !== undefined) clean.gradeLevel = updates.gradeLevel.trim().slice(0, 60);
+  if (updates.packageId !== undefined) clean.packageId = updates.packageId;
+  if (updates.packageName !== undefined)
+    clean.packageName = updates.packageName.trim().slice(0, 120);
+  if (updates.branchId !== undefined) clean.branchId = updates.branchId;
+  if (updates.branchName !== undefined) clean.branchName = updates.branchName.trim().slice(0, 120);
+  if (updates.billingAmount !== undefined && Number.isFinite(updates.billingAmount)) {
+    clean.billingAmount = Math.max(0, Number(updates.billingAmount));
+  }
+  if (updates.initialPaymentStatus !== undefined) {
+    clean.initialPaymentStatus = updates.initialPaymentStatus;
+  }
+  if (updates.registeredAtIso !== undefined) clean.registeredAtIso = updates.registeredAtIso;
+  if (updates.nextDueAtIso !== undefined) clean.nextDueAtIso = updates.nextDueAtIso;
+  if (updates.status !== undefined) clean.status = updates.status;
+  if (updates.academicStatus !== undefined) clean.academicStatus = updates.academicStatus;
+  if (updates.parentName !== undefined)
+    clean.parentName = updates.parentName.trim().slice(0, 120);
+  if (updates.parentPhone !== undefined)
+    clean.parentPhone = updates.parentPhone.trim().slice(0, 30);
+  if (updates.notes !== undefined) clean.notes = updates.notes.trim().slice(0, 500);
+  if (updates.adminNotes !== undefined) clean.adminNotes = updates.adminNotes.trim().slice(0, 500);
+
   try {
-    const clean: Record<string, unknown> = { updatedAt: serverTimestamp() };
-    if (updates.childName !== undefined) clean.childName = updates.childName.trim().slice(0, 120);
-    if (updates.childPhotoUrl !== undefined)
-      clean.childPhotoUrl = updates.childPhotoUrl.trim().slice(0, 500);
-    if (updates.childGender !== undefined) clean.childGender = updates.childGender;
-    if (updates.gradeLevel !== undefined) clean.gradeLevel = updates.gradeLevel.trim().slice(0, 60);
-    if (updates.packageId !== undefined) clean.packageId = updates.packageId;
-    if (updates.packageName !== undefined)
-      clean.packageName = updates.packageName.trim().slice(0, 120);
-    if (updates.branchId !== undefined) clean.branchId = updates.branchId;
-    if (updates.branchName !== undefined) clean.branchName = updates.branchName.trim().slice(0, 120);
-    if (updates.billingAmount !== undefined && Number.isFinite(updates.billingAmount)) {
-      clean.billingAmount = Math.max(0, Number(updates.billingAmount));
-    }
-    if (updates.initialPaymentStatus !== undefined) {
-      clean.initialPaymentStatus = updates.initialPaymentStatus;
-    }
-    if (updates.registeredAtIso !== undefined) clean.registeredAtIso = updates.registeredAtIso;
-    if (updates.nextDueAtIso !== undefined) clean.nextDueAtIso = updates.nextDueAtIso;
-    if (updates.status !== undefined) clean.status = updates.status;
-    if (updates.academicStatus !== undefined) clean.academicStatus = updates.academicStatus;
-    if (updates.parentPhone !== undefined)
-      clean.parentPhone = updates.parentPhone.trim().slice(0, 30);
-    if (updates.adminNotes !== undefined) clean.adminNotes = updates.adminNotes.trim().slice(0, 500);
     await updateDoc(doc(db, 'students', studentId), clean);
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    const isPermError =
+      msg.toLowerCase().includes('permission') ||
+      (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'permission-denied');
+    if (isPermError && (clean.birthDate || clean.schoolOrigin || clean.studentAddress || clean.parentName)) {
+      const compatClean: Record<string, unknown> = { ...clean };
+      delete compatClean.birthDate;
+      delete compatClean.schoolOrigin;
+      delete compatClean.studentAddress;
+      delete compatClean.parentName;
+      compatClean.notes = serializeArchiveMetaNotes({
+        birthDate: updates.birthDate,
+        schoolOrigin: updates.schoolOrigin,
+        studentAddress: updates.studentAddress,
+        userNotes: updates.notes,
+        isArchive: Boolean(updates.birthDate || updates.schoolOrigin || updates.studentAddress),
+      });
+      try {
+        await updateDoc(doc(db, 'students', studentId), compatClean);
+        return;
+      } catch (compatErr) {
+        handleFirestoreError(compatErr, OperationType.UPDATE, path);
+      }
+    }
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }

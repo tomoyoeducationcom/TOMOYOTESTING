@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ArrowRight, BookOpen } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { BRAND_IDENTITY } from '../lib/domain';
 import { useSiteData } from '../context/SiteDataContext';
 import { GoogleOfficialIcon } from '../components/BrandIcons';
@@ -19,8 +19,8 @@ export function HomePage() {
 
   return (
     <div>
-      {/* Full-bleed Editorial Hero over Authentic Aerial Alun-Alun Indramayu Photography */}
-      <section className="relative overflow-hidden bg-[#121820] text-white">
+      {/* Editorial Full-Bleed Hero over Aerial Alun-Alun Indramayu Photography */}
+      <section className="relative overflow-hidden bg-[#141A23] text-white min-h-[540px] sm:min-h-[600px] lg:min-h-[640px] flex flex-col justify-between">
         <img
           src={HERO_INDRAMAYU_ALUN_ALUN}
           alt="Pemandangan udara Alun-Alun Indramayu dan Gunung Ciremai di kejauhan"
@@ -29,30 +29,25 @@ export function HomePage() {
         />
         <div className="hero-scrim absolute inset-0" aria-hidden="true" />
 
-        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-12 pb-14 sm:pt-16 sm:pb-20 lg:pt-20 lg:pb-24 space-y-10 lg:space-y-12">
-          {/* Typography positioned directly over scrimmed photograph */}
-          <div className="max-w-3xl space-y-4">
-            <p className="text-xs sm:text-sm font-semibold tracking-[0.18em] uppercase text-slate-200">
-              {BRAND_IDENTITY.tagline} · INDRAMAYU KOTA &amp; TERISI
+        <div className="relative z-10 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-16 pb-10 sm:pt-24 sm:pb-12 lg:pt-28 lg:pb-14 flex-1 flex flex-col justify-between gap-12">
+          {/* Editorial Focal Block — sits directly over photography with directional dark scrim */}
+          <div className="max-w-2xl space-y-5">
+            <p className="text-xs font-semibold tracking-[0.18em] uppercase text-[#FDE68A]">
+              {BRAND_IDENTITY.tagline} · KABUPATEN INDRAMAYU
             </p>
 
-            <h1 className="font-display font-extrabold tracking-tight leading-[0.98]">
-              <span className="block text-5xl sm:text-6xl lg:text-[4.75rem] text-white drop-shadow-sm">
-                TOMOYO EDUCATION
-              </span>
-              <span className="block text-3xl sm:text-5xl lg:text-[3.5rem] text-[#D9F99D] mt-1">
-                PRIVAT &amp; BIMBEL
-              </span>
+            <h1 className="font-display font-bold tracking-tight leading-[1.06] text-4xl sm:text-5xl lg:text-[3.75rem] text-white">
+              Pendampingan Belajar Terarah untuk Generasi Cerdas Indramayu
             </h1>
 
-            <p className="text-base sm:text-lg text-slate-100/95 leading-relaxed max-w-2xl">
-              {BRAND_IDENTITY.meaning} Pendampingan belajar terarah untuk siswa TK hingga Kelas 6 SD di Kabupaten Indramayu.
+            <p className="text-base sm:text-lg text-slate-100/90 leading-relaxed max-w-xl">
+              {BRAND_IDENTITY.officialName} membimbing siswa tingkat TK hingga Kelas 6 SD dengan pendekatan privat dan kelompok kecil yang hangat, disiplin, dan terukur.
             </p>
 
-            <div className="flex flex-wrap items-center gap-3 pt-2">
+            <div className="flex flex-wrap items-center gap-4 pt-2">
               <Link
                 to="/daftar"
-                className="inline-flex items-center justify-center gap-2.5 px-6 py-3.5 min-h-[48px] text-sm sm:text-base font-bold text-white bg-[#BE123C] hover:bg-[#9F1239] rounded-xl shadow-lg transition-colors whitespace-nowrap"
+                className="inline-flex items-center justify-center gap-2.5 px-6 py-3.5 min-h-[48px] text-sm sm:text-base font-semibold text-white bg-[#A61B38] hover:bg-[#88132B] rounded-lg shadow-lg transition-colors whitespace-nowrap"
               >
                 <span className="w-5 h-5 rounded-full bg-white flex items-center justify-center shrink-0">
                   <GoogleOfficialIcon className="w-3.5 h-3.5" />
@@ -61,47 +56,43 @@ export function HomePage() {
               </Link>
               <a
                 href="#program-belajar"
-                className="inline-flex items-center justify-center gap-2 px-5 py-3.5 min-h-[48px] text-sm sm:text-base font-semibold text-white bg-white/15 hover:bg-white/25 border border-white/35 backdrop-blur-xs rounded-xl transition-colors whitespace-nowrap"
+                className="inline-flex items-center gap-2 px-2 py-2.5 min-h-[44px] text-sm sm:text-base font-semibold text-white/95 hover:text-[#FDE68A] border-b border-white/45 hover:border-[#FDE68A] transition-colors whitespace-nowrap"
               >
                 <span>Lihat Paket Belajar</span>
-              </a>
-              <Link
-                to="/kuis"
-                className="inline-flex items-center justify-center gap-2 px-5 py-3.5 min-h-[48px] text-sm sm:text-base font-semibold text-[#D9F99D] bg-[#121820]/70 hover:bg-[#121820]/90 border border-[#D9F99D]/45 rounded-xl backdrop-blur-xs transition-colors whitespace-nowrap"
-              >
-                <BookOpen className="w-4 h-4 shrink-0" />
-                <span>Portal Kuis Online</span>
                 <ArrowRight className="w-4 h-4 shrink-0" />
-              </Link>
+              </a>
             </div>
           </div>
 
-          {/* Integrated 3-Package Quick Strip over the lower photographic landscape */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6">
-            {data.packages.map((pkg, idx) => (
+          {/* Grounded Architectural Fact Strip at Base of Hero (No Heavy Translucent Cards) */}
+          <div className="border-t border-white/25 pt-5 grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 text-sm">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-300">
+                Jenjang Bimbingan
+              </p>
+              <p className="font-semibold text-white mt-0.5">TK – Kelas 6 SD</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-300">
+                Kantor Pusat
+              </p>
+              <p className="font-semibold text-white mt-0.5">Indramayu Kota</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-300">
+                Kantor Cabang
+              </p>
+              <p className="font-semibold text-white mt-0.5">Kecamatan Terisi</p>
+            </div>
+            <div className="flex items-end lg:justify-end">
               <Link
-                key={pkg.id}
-                to={`/program#paket-${idx + 1}`}
-                className="hero-package-panel rounded-2xl p-5 sm:p-6 flex flex-col justify-between gap-4 text-left group"
+                to="/kuis"
+                className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#FDE68A] hover:text-white transition-colors"
               >
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-2 text-xs font-mono text-[#D9F99D]">
-                    <span>PAKET 0{idx + 1}</span>
-                    <span className="text-slate-200 font-sans font-semibold">{pkg.levelRange}</span>
-                  </div>
-                  <h2 className="font-display text-2xl sm:text-[1.7rem] font-bold tracking-tight text-white leading-tight">
-                    {pkg.title.replace(/^PAKET \d+:\s*/i, '')}
-                  </h2>
-                  <p className="text-xs sm:text-sm text-slate-200/95 leading-relaxed">
-                    {pkg.subjects.join(' · ')}
-                  </p>
-                </div>
-                <div className="pt-2 border-t border-white/15 flex items-center justify-between text-xs font-semibold text-[#D9F99D] group-hover:text-white transition-colors">
-                  <span>Lihat rincian biaya &amp; fokus</span>
-                  <ArrowRight className="w-4 h-4 shrink-0" />
-                </div>
+                <span>Portal Kuis Online Siswa</span>
+                <ArrowRight className="w-4 h-4 shrink-0" />
               </Link>
-            ))}
+            </div>
           </div>
         </div>
       </section>

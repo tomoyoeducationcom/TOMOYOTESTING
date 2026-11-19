@@ -34,7 +34,7 @@ export type RegistrationStatus = 'pending' | 'approved' | 'rejected';
 export type AcademicStatus = 'menunggu' | 'aktif' | 'lulus' | 'nonaktif';
 export type PaymentStatus = 'lunas' | 'cicilan' | 'belum_bayar';
 export type ChildGender = 'Laki-laki' | 'Perempuan';
-export type RegistrationChannel = 'online' | 'offline';
+export type RegistrationChannel = 'online' | 'offline' | 'migration';
 export type NotificationType =
   | 'registration'
   | 'offline_registration'
@@ -138,6 +138,9 @@ export interface StudentRecord {
   parentEmail: string;
   parentPhone: string;
   childName: string;
+  birthDate?: string;
+  schoolOrigin?: string;
+  studentAddress?: string;
   childPhotoUrl?: string;
   childGender?: ChildGender;
   gradeLevel: string;
@@ -455,6 +458,94 @@ export interface OfflineRegistrationDraft {
   notes?: string;
 }
 
+export interface LegacyStudentMigrationDraft {
+  parentName: string;
+  parentPhone: string;
+  childName: string;
+  birthDate: string;
+  childPhotoUrl: string;
+  childGender: ChildGender;
+  gradeLevel: string;
+  schoolOrigin?: string;
+  studentAddress?: string;
+  packageId: PackageId;
+  branchId: BranchId;
+  registeredAtLocal: string;
+  nextDueAtLocal?: string;
+  billingAmount: number | '';
+  initialPaymentStatus: PaymentStatus;
+  paymentMethod: string;
+  paymentPeriodLabel?: string;
+  academicStatus: AcademicStatus;
+  notes?: string;
+  notifyWhatsappOnSave?: boolean;
+}
+
+export function formatIndonesianDate(dateStr?: string): string {
+  if (!dateStr) return '-';
+  const trimmed = dateStr.trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(trimmed);
+  const dt = match
+    ? new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
+    : new Date(trimmed);
+  if (Number.isNaN(dt.getTime())) return trimmed;
+  return dt.toLocaleDateString('id-ID', {
+    timeZone: 'UTC',
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+export function serializeArchiveMetaNotes(params: {
+  birthDate?: string;
+  schoolOrigin?: string;
+  studentAddress?: string;
+  userNotes?: string;
+  isArchive?: boolean;
+}): string {
+  const parts: string[] = [];
+  if (params.birthDate?.trim()) parts.push(`TglLahir=${params.birthDate.trim()}`);
+  if (params.schoolOrigin?.trim()) parts.push(`Sekolah=${params.schoolOrigin.trim()}`);
+  if (params.studentAddress?.trim()) parts.push(`Alamat=${params.studentAddress.trim()}`);
+  const header = params.isArchive || parts.length > 0 ? `[ARSIP${parts.length ? `: ${parts.join(' | ')}` : ''}]` : '';
+  const cleanUserNotes = (params.userNotes || '').replace(/\[ARSIP(?::[^\]]*)?\]\s*/g, '').trim();
+  return [header, cleanUserNotes].filter(Boolean).join(' ').slice(0, 500);
+}
+
+export function parseStudentArchiveMeta(
+  student: Pick<StudentRecord, 'birthDate' | 'schoolOrigin' | 'studentAddress' | 'notes' | 'registrationChannel'>
+): {
+  isMigration: boolean;
+  birthDate?: string;
+  schoolOrigin?: string;
+  studentAddress?: string;
+  cleanNotes?: string;
+} {
+  const notes = student.notes || '';
+  const match = /\[ARSIP(?::\s*([^\]]*))?\]/i.exec(notes);
+  let birthDate = student.birthDate?.trim() || undefined;
+  let schoolOrigin = student.schoolOrigin?.trim() || undefined;
+  let studentAddress = student.studentAddress?.trim() || undefined;
+
+  if (match && match[1]) {
+    const segments = match[1].split('|').map((s) => s.trim());
+    for (const seg of segments) {
+      if (seg.startsWith('TglLahir=') && !birthDate) {
+        birthDate = seg.slice('TglLahir='.length).trim() || undefined;
+      } else if (seg.startsWith('Sekolah=') && !schoolOrigin) {
+        schoolOrigin = seg.slice('Sekolah='.length).trim() || undefined;
+      } else if (seg.startsWith('Alamat=') && !studentAddress) {
+        studentAddress = seg.slice('Alamat='.length).trim() || undefined;
+      }
+    }
+  }
+
+  const cleanNotes = notes.replace(/\[ARSIP(?::[^\]]*)?\]\s*/gi, '').trim() || undefined;
+  const isMigration = student.registrationChannel === 'migration' || Boolean(match);
+  return { isMigration, birthDate, schoolOrigin, studentAddress, cleanNotes };
+}
+
 export function normalizeWhatsappPhone(raw: string): string {
   const digits = raw.replace(/[^\d+]/g, '');
   if (!digits) return '';
@@ -561,6 +652,105 @@ export function validateOfflineRegistrationDraft(
   return { valid: errors.length === 0, errors };
 }
 
+export function validateLegacyMigrationDraft(
+  draft: LegacyStudentMigrationDraft
+): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  if (draft.childName.trim().length < 2 || draft.childName.trim().length > 120) {
+    errors.push('Nama lengkap siswa wajib diisi (2–120 karakter).');
+  }
+  if (draft.birthDate.trim()) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.birthDate.trim())) {
+      errors.push('Format tanggal lahir siswa tidak valid (gunakan YYYY-MM-DD).');
+    } else {
+      const dob = new Date(`${draft.birthDate.trim()}T00:00:00Z`);
+      if (Number.isNaN(dob.getTime()) || dob.getTime() > Date.now()) {
+        errors.push('Tanggal lahir siswa tidak valid atau melebihi hari ini.');
+      }
+    }
+  }
+  if (draft.childPhotoUrl.trim() && !/^https?:\/\/.+/i.test(draft.childPhotoUrl.trim())) {
+    errors.push('URL foto siswa harus berupa tautan Cloudinary yang valid.');
+  }
+  if (!['Laki-laki', 'Perempuan'].includes(draft.childGender)) {
+    errors.push('Jenis kelamin siswa wajib dipilih.');
+  }
+  if (draft.gradeLevel.trim().length < 1 || draft.gradeLevel.trim().length > 60) {
+    errors.push('Kelas / tingkat pendidikan siswa wajib diisi.');
+  }
+  if (draft.parentName.trim().length < 2 || draft.parentName.trim().length > 120) {
+    errors.push('Nama orang tua / wali wajib diisi (2–120 karakter).');
+  }
+  const cleanDigits = draft.parentPhone.replace(/\D/g, '');
+  if (cleanDigits.length < 8 || cleanDigits.length > 20) {
+    errors.push('Kontak / WhatsApp orang tua wajib valid (minimal 8 digit).');
+  }
+  if (!['paket-1', 'paket-2', 'paket-3'].includes(draft.packageId)) {
+    errors.push('Paket belajar resmi wajib dipilih.');
+  }
+  if (!['indramayu-kota', 'terisi'].includes(draft.branchId)) {
+    errors.push('Cabang (Pusat Indramayu Kota atau Cabang Terisi) wajib dipilih.');
+  }
+  if (!draft.registeredAtLocal || Number.isNaN(new Date(draft.registeredAtLocal).getTime())) {
+    errors.push('Tanggal masuk siswa wajib diisi dengan format tanggal yang valid.');
+  }
+  if (draft.billingAmount === '' || Number.isNaN(Number(draft.billingAmount)) || Number(draft.billingAmount) < 0) {
+    errors.push('Nominal tagihan wajib diisi (>= 0).');
+  }
+  if (!['lunas', 'cicilan', 'belum_bayar'].includes(draft.initialPaymentStatus)) {
+    errors.push('Status tagihan / pembayaran wajib dipilih.');
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+export function filterAndSplitStudentsByBranch(
+  students: StudentRecord[],
+  filters: {
+    searchQuery?: string;
+    branchFilter?: 'all' | BranchId;
+    statusFilter?: 'all' | RegistrationStatus;
+    packageFilter?: 'all' | PackageId;
+    channelFilter?: 'all' | RegistrationChannel;
+  }
+): {
+  filtered: StudentRecord[];
+  pusat: StudentRecord[];
+  cabang: StudentRecord[];
+} {
+  const q = (filters.searchQuery || '').trim().toLowerCase();
+  const filtered = students.filter((s) => {
+    if (filters.branchFilter && filters.branchFilter !== 'all' && s.branchId !== filters.branchFilter) {
+      return false;
+    }
+    if (filters.statusFilter && filters.statusFilter !== 'all' && s.status !== filters.statusFilter) {
+      return false;
+    }
+    if (filters.packageFilter && filters.packageFilter !== 'all' && s.packageId !== filters.packageFilter) {
+      return false;
+    }
+    const meta = parseStudentArchiveMeta(s);
+    if (filters.channelFilter && filters.channelFilter !== 'all') {
+      const effectiveChannel: RegistrationChannel = meta.isMigration
+        ? 'migration'
+        : s.registrationChannel || 'online';
+      if (effectiveChannel !== filters.channelFilter) return false;
+    }
+    if (!q) return true;
+    return (
+      s.childName.toLowerCase().includes(q) ||
+      s.parentName.toLowerCase().includes(q) ||
+      s.parentEmail.toLowerCase().includes(q) ||
+      s.parentPhone.toLowerCase().includes(q) ||
+      (meta.schoolOrigin || '').toLowerCase().includes(q) ||
+      (meta.studentAddress || '').toLowerCase().includes(q)
+    );
+  });
+
+  const pusat = filtered.filter((s) => s.branchId === 'indramayu-kota');
+  const cabang = filtered.filter((s) => s.branchId === 'terisi');
+  return { filtered, pusat, cabang };
+}
+
 export function buildRegistrationNotificationMessage(params: {
   parentName: string;
   parentPhone?: string;
@@ -577,9 +767,17 @@ export function buildRegistrationNotificationMessage(params: {
 }): string {
   const cleanBase = params.appUrl.replace(/\/+$/, '');
   const title =
-    params.channel === 'offline'
+    params.channel === 'migration'
+      ? '📂 PINDAH DATA SISWA LAMA (ARSIP) — TOMOYO EDUCATION'
+      : params.channel === 'offline'
       ? '📝 PENDAFTARAN SISWA OFFLINE (ADMIN) — TOMOYO EDUCATION'
       : '🔔 PENDAFTARAN SISWA BARU — TOMOYO EDUCATION';
+  const statusText =
+    params.channel === 'migration'
+      ? 'TERDAFTAR DARI ARSIP BERKAS (AKTIF)'
+      : params.channel === 'offline'
+      ? 'TERDAFTAR OFFLINE (DISETUJUI ADMIN)'
+      : 'MENUNGGU PERSETUJUAN';
   const lines = [
     title,
     '',
@@ -597,7 +795,7 @@ export function buildRegistrationNotificationMessage(params: {
     ...(params.nextDueAtIso
       ? [`Jadwal Jatuh Tempo Berikutnya: ${formatJakartaDateTime(params.nextDueAtIso)}`]
       : []),
-    `Status: ${params.channel === 'offline' ? 'TERDAFTAR OFFLINE (DISETUJUI ADMIN)' : 'MENUNGGU PERSETUJUAN'}`,
+    `Status: ${statusText}`,
     '',
     'Silakan periksa data siswa melalui dashboard admin:',
     `${cleanBase}/admintomoyo`,

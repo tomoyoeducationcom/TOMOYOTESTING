@@ -87,7 +87,8 @@ function normalizeWhatsappPhone(raw) {
 }
 function buildRegistrationNotificationMessage(params) {
   const cleanBase = params.appUrl.replace(/\/+$/, "");
-  const title = params.channel === "offline" ? "\u{1F4DD} PENDAFTARAN SISWA OFFLINE (ADMIN) \u2014 TOMOYO EDUCATION" : "\u{1F514} PENDAFTARAN SISWA BARU \u2014 TOMOYO EDUCATION";
+  const title = params.channel === "migration" ? "\u{1F4C2} PINDAH DATA SISWA LAMA (ARSIP) \u2014 TOMOYO EDUCATION" : params.channel === "offline" ? "\u{1F4DD} PENDAFTARAN SISWA OFFLINE (ADMIN) \u2014 TOMOYO EDUCATION" : "\u{1F514} PENDAFTARAN SISWA BARU \u2014 TOMOYO EDUCATION";
+  const statusText = params.channel === "migration" ? "TERDAFTAR DARI ARSIP BERKAS (AKTIF)" : params.channel === "offline" ? "TERDAFTAR OFFLINE (DISETUJUI ADMIN)" : "MENUNGGU PERSETUJUAN";
   const lines = [
     title,
     "",
@@ -101,7 +102,7 @@ function buildRegistrationNotificationMessage(params) {
     ...typeof params.billingAmount === "number" ? [`Nominal Paket: ${formatRupiah(params.billingAmount)}`] : [],
     ...params.paymentStatusLabel ? [`Status Pembayaran: ${params.paymentStatusLabel}`] : [],
     ...params.nextDueAtIso ? [`Jadwal Jatuh Tempo Berikutnya: ${formatJakartaDateTime(params.nextDueAtIso)}`] : [],
-    `Status: ${params.channel === "offline" ? "TERDAFTAR OFFLINE (DISETUJUI ADMIN)" : "MENUNGGU PERSETUJUAN"}`,
+    `Status: ${statusText}`,
     "",
     "Silakan periksa data siswa melalui dashboard admin:",
     `${cleanBase}/admintomoyo`
@@ -1090,13 +1091,31 @@ function persistKey(key) {
   const items = Array.from(sentIdempotencyKeys).slice(-2e3);
   writeJsonData(IDEMPOTENCY_FILENAME, items);
 }
+function sanitizeFonnteToken(raw) {
+  if (typeof raw !== "string") return "";
+  let cleaned = raw.trim();
+  if (cleaned.startsWith('"') && cleaned.endsWith('"') || cleaned.startsWith("'") && cleaned.endsWith("'")) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+  cleaned = cleaned.replace(/^Bearer\s+/i, "").trim();
+  return cleaned;
+}
+function formatFonnteFailureDetail(rawDetail) {
+  const clean = rawDetail.trim();
+  if (/unknown\s+token/i.test(clean)) {
+    return `unknown token \u2014 Token device Fonnte ditolak oleh api.fonnte.com. Pastikan environment variable FONNTE_TOKEN di Vercel (scope Production) diisi dengan Device Token resmi untuk nomor 083121902760 (${FONNTE_SENDER_NUMBER}) \u2014 bukan Account Token \u2014 tanpa tanda kutip/spasi, lalu lakukan Redeploy tanpa cache.`;
+  }
+  if (/disconnect|not\s+connected|device\s+not\s+ready/i.test(clean)) {
+    return `${clean} \u2014 Perangkat WhatsApp ${FONNTE_SENDER_NUMBER} di dashboard Fonnte sedang terputus; silakan scan ulang QR WhatsApp di Fonnte.`;
+  }
+  return clean;
+}
 function isFonnteConfigured() {
-  const token = process.env.FONNTE_TOKEN;
-  return typeof token === "string" && token.trim().length > 0;
+  return sanitizeFonnteToken(process.env.FONNTE_TOKEN).length > 0;
 }
 async function sendFonnteWhatsApp(params) {
   const target = params.target || ADMIN_WHATSAPP_TARGET;
-  const token = process.env.FONNTE_TOKEN?.trim();
+  const token = sanitizeFonnteToken(process.env.FONNTE_TOKEN);
   if (!token) {
     return {
       status: "unconfigured",
@@ -1151,7 +1170,8 @@ async function sendFonnteWhatsApp(params) {
           detail: parsed.detail || "Pesan berhasil dikirim oleh Fonnte."
         };
       }
-      lastError = parsed?.reason || parsed?.detail || `Fonnte merespons HTTP ${response.status} dengan status gagal.`;
+      const rawError = parsed?.reason || parsed?.detail || `Fonnte merespons HTTP ${response.status} dengan status gagal.`;
+      lastError = formatFonnteFailureDetail(rawError);
       if (response.status < 500) {
         break;
       }
@@ -1167,7 +1187,7 @@ async function sendFonnteWhatsApp(params) {
   };
 }
 async function checkFonnteDeviceStatus() {
-  const token = process.env.FONNTE_TOKEN?.trim();
+  const token = sanitizeFonnteToken(process.env.FONNTE_TOKEN);
   if (!token) {
     return {
       configured: false,
@@ -1198,28 +1218,34 @@ async function checkFonnteDeviceStatus() {
         configured: true,
         connected,
         senderNumber: FONNTE_SENDER_NUMBER,
+        deviceNumber: parsed.device ? String(parsed.device) : void 0,
+        deviceName: parsed.name ? String(parsed.name) : void 0,
         deviceStatus: devStatus,
         quota: parsed.quota ? String(parsed.quota) : void 0,
-        detail: connected ? `Perangkat Fonnte terhubung (${devStatus}).` : `Perangkat Fonnte berstatus: ${devStatus}.`
+        tokenLength: token.length,
+        detail: connected ? `Perangkat Fonnte terhubung (${devStatus})${parsed.device ? ` \u2014 Nomor terdaftar: ${parsed.device}` : ""}.` : `Perangkat Fonnte berstatus: ${devStatus}.`
       };
     }
+    const rawErr = parsed?.reason || parsed?.detail || `HTTP ${response.status} dari Fonnte device check.`;
     return {
       configured: true,
       connected: false,
       senderNumber: FONNTE_SENDER_NUMBER,
-      detail: parsed?.reason || parsed?.detail || `HTTP ${response.status} dari Fonnte device check.`
+      tokenLength: token.length,
+      detail: formatFonnteFailureDetail(rawErr)
     };
   } catch (err) {
     return {
       configured: true,
       connected: false,
       senderNumber: FONNTE_SENDER_NUMBER,
+      tokenLength: token.length,
       detail: err instanceof Error ? err.message : "Gagal mengecek status perangkat Fonnte."
     };
   }
 }
 async function fetchFonnteGroupRefresh() {
-  const token = process.env.FONNTE_TOKEN?.trim();
+  const token = sanitizeFonnteToken(process.env.FONNTE_TOKEN);
   if (!token) {
     return {
       ok: false,
@@ -1252,7 +1278,9 @@ async function fetchFonnteGroupRefresh() {
     return {
       ok: false,
       configured: true,
-      detail: parsed?.reason || parsed?.detail || `Gagal fetch-group Fonnte (HTTP ${response.status}).`
+      detail: formatFonnteFailureDetail(
+        parsed?.reason || parsed?.detail || `Gagal fetch-group Fonnte (HTTP ${response.status}).`
+      )
     };
   } catch (err) {
     return {
@@ -1263,7 +1291,7 @@ async function fetchFonnteGroupRefresh() {
   }
 }
 async function getFonnteWhatsappGroups() {
-  const token = process.env.FONNTE_TOKEN?.trim();
+  const token = sanitizeFonnteToken(process.env.FONNTE_TOKEN);
   if (!token) {
     return {
       ok: false,
@@ -1307,7 +1335,9 @@ async function getFonnteWhatsappGroups() {
     return {
       ok: false,
       configured: true,
-      detail: parsed?.reason || parsed?.detail || `Gagal mengambil grup (HTTP ${response.status}).`,
+      detail: formatFonnteFailureDetail(
+        parsed?.reason || parsed?.detail || `Gagal mengambil grup (HTTP ${response.status}).`
+      ),
       groups: []
     };
   } catch (err) {
@@ -2289,6 +2319,7 @@ function createApp() {
       dueAtIso: nextDueAtIso,
       billingAmount: typeof body.billingAmount === "number" ? body.billingAmount : null
     });
+    const channel = body.channel === "migration" ? "migration" : "offline";
     const message = buildRegistrationNotificationMessage({
       parentName,
       parentPhone,
@@ -2299,7 +2330,7 @@ function createApp() {
       branchName,
       billingAmount: typeof body.billingAmount === "number" ? body.billingAmount : null,
       nextDueAtIso,
-      channel: "offline",
+      channel,
       paymentStatusLabel: body.initialPaymentStatus ? getPaymentStatusLabel(body.initialPaymentStatus) : void 0,
       appUrl: baseUrl
     });
@@ -2430,6 +2461,19 @@ function createApp() {
       ...delivery,
       messagePreview: message.slice(0, 480)
     });
+  });
+  app2.get("/api/admin/fonnte/device", async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded) {
+      res.status(401).json({ error: "Token Firebase tidak valid." });
+      return;
+    }
+    if (!isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: "Akses ditolak. Khusus akun admin terotorisasi." });
+      return;
+    }
+    const status = await checkFonnteDeviceStatus();
+    res.json(status);
   });
   app2.get("/api/quizzes", (_req, res) => {
     res.json({ quizzes: listPublicQuizzes() });
