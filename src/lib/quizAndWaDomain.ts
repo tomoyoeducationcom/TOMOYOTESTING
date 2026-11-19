@@ -726,6 +726,87 @@ export function isValidWaTarget(raw: string): {
   return { valid: true, normalized: digits, isGroupId: false };
 }
 
+export function buildDefaultQuizWaMessage(input: {
+  title: string;
+  targetClass?: string;
+  questionCount?: number;
+  timeLimitMinutes?: number;
+  quizUrl: string;
+}): string {
+  const title = input.title.trim() || 'Kuis Online TOMOYO';
+  const targetClass = (input.targetClass || 'Semua Tingkat').trim();
+  const lines = [
+    `*KUIS ONLINE — ${BRAND_IDENTITY.shortName}*`,
+    '',
+    `Judul Kuis: *${title}*`,
+    `Target Kelas: ${targetClass}`,
+  ];
+  if (typeof input.questionCount === 'number' && input.questionCount > 0) {
+    const durationLabel =
+      typeof input.timeLimitMinutes === 'number' && input.timeLimitMinutes > 0
+        ? `${input.timeLimitMinutes} Menit`
+        : 'Tanpa Batas Waktu';
+    lines.push(`Detail: ${input.questionCount} Soal · ${durationLabel}`);
+  }
+  lines.push(
+    '',
+    'Silakan kerjakan langsung melalui tautan resmi berikut:',
+    input.quizUrl,
+    '',
+    'Isi nama lengkap dan kelas sebelum mulai mengerjakan. Semangat belajar!'
+  );
+  return lines.join('\n');
+}
+
+export function resolveQuizWaTargets(
+  groupIds: string[],
+  singlePhone?: string
+): {
+  ok: boolean;
+  targets: Array<{ target: string; kind: 'group' | 'phone' }>;
+  error?: string;
+} {
+  const seen = new Set<string>();
+  const targets: Array<{ target: string; kind: 'group' | 'phone' }> = [];
+
+  for (const rawId of groupIds) {
+    const clean = typeof rawId === 'string' ? rawId.trim() : '';
+    if (!clean) continue;
+    if (!seen.has(clean)) {
+      seen.add(clean);
+      targets.push({ target: clean, kind: 'group' });
+    }
+  }
+
+  const trimmedPhone = typeof singlePhone === 'string' ? singlePhone.trim() : '';
+  if (trimmedPhone) {
+    const check = isValidWaTarget(trimmedPhone);
+    if (!check.valid || check.isGroupId) {
+      return {
+        ok: false,
+        targets: [],
+        error: check.isGroupId
+          ? 'Kolom nomor tujuan hanya untuk 1 nomor WhatsApp pribadi (bukan ID grup).'
+          : check.reason || 'Format nomor WhatsApp tujuan tidak valid.',
+      };
+    }
+    if (!seen.has(check.normalized)) {
+      seen.add(check.normalized);
+      targets.push({ target: check.normalized, kind: 'phone' });
+    }
+  }
+
+  if (targets.length === 0) {
+    return {
+      ok: false,
+      targets: [],
+      error: 'Pilih minimal 1 grup WhatsApp (centang) atau masukkan 1 nomor WhatsApp tujuan.',
+    };
+  }
+
+  return { ok: true, targets };
+}
+
 export function parseContactsCsvText(csvText: string): WaRecipientInput[] {
   const lines = csvText
     .split(/\r?\n/)

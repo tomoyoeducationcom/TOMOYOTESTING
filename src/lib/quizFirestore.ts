@@ -4,10 +4,13 @@ import {
   deleteField,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
+  getDocsFromServer,
   query,
   serverTimestamp,
   setDoc,
+  updateDoc,
   where,
   writeBatch,
   type Timestamp,
@@ -145,31 +148,37 @@ export async function adminFetchQuizzesAndAttemptsFromFirestore(): Promise<{
 }> {
   let quizSnap;
   try {
-    quizSnap = await getDocs(collection(db, 'quizzes'));
+    quizSnap = await getDocsFromServer(collection(db, 'quizzes'));
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, 'quizzes');
   }
 
-  let keySnap;
+  let keySnap: Awaited<ReturnType<typeof getDocsFromServer>> | null = null;
   try {
-    keySnap = await getDocs(collection(db, 'quizKeys'));
+    keySnap = await getDocsFromServer(collection(db, 'quizKeys'));
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, 'quizKeys');
+    if (isFirestorePermissionDeniedError(error)) {
+      handleFirestoreError(error, OperationType.LIST, 'quizKeys');
+    }
+    keySnap = null;
   }
 
-  let attemptsSnap;
+  let attemptsSnap: Awaited<ReturnType<typeof getDocsFromServer>> | null = null;
   try {
-    attemptsSnap = await getDocs(collection(db, 'quizAttempts'));
+    attemptsSnap = await getDocsFromServer(collection(db, 'quizAttempts'));
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, 'quizAttempts');
+    if (isFirestorePermissionDeniedError(error)) {
+      handleFirestoreError(error, OperationType.LIST, 'quizAttempts');
+    }
+    attemptsSnap = null;
   }
 
   const keyMap = new Map<string, FirestoreQuizKeyDoc>();
-  keySnap.docs.forEach((d) => {
+  keySnap?.docs.forEach((d) => {
     keyMap.set(d.id, d.data() as FirestoreQuizKeyDoc);
   });
 
-  const attempts: QuizAttemptRecord[] = attemptsSnap.docs
+  const attempts: QuizAttemptRecord[] = (attemptsSnap?.docs || [])
     .map((d) => {
       const raw = d.data() as Omit<QuizAttemptRecord, 'id'>;
       return {
@@ -276,9 +285,13 @@ export async function adminSaveQuizToFirestore(
 
   let existingSnap;
   try {
-    existingSnap = await getDoc(quizRef);
+    existingSnap = await getDocFromServer(quizRef);
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, `quizzes/${quizId}`);
+    try {
+      existingSnap = await getDoc(quizRef);
+    } catch {
+      handleFirestoreError(error, OperationType.GET, `quizzes/${quizId}`);
+    }
   }
 
   const title = (payload.title || '').trim().slice(0, 180);
@@ -350,6 +363,21 @@ export async function adminSaveQuizToFirestore(
     );
   }
 
+  // Verify immediately against Firestore server so UI never shows ephemeral/cached-only state
+  try {
+    const verifiedSnap = await getDocFromServer(quizRef);
+    if (!verifiedSnap.exists()) {
+      throw new Error(
+        'Kuis tidak terkonfirmasi di server Firestore setelah disimpan. Pastikan aturan firestore.rules sudah dipublish pada database yang benar.'
+      );
+    }
+  } catch (verifyErr) {
+    if (verifyErr instanceof Error && verifyErr.message.includes('terkonfirmasi')) {
+      throw verifyErr;
+    }
+    handleFirestoreError(verifyErr, OperationType.GET, `quizzes/${quizId}`);
+  }
+
   const nowIso = new Date().toISOString();
   const savedQuiz: QuizDefinition = {
     id: quizId,
@@ -368,6 +396,22 @@ export async function adminSaveQuizToFirestore(
   };
 
   return { ok: true, quiz: savedQuiz };
+}
+
+export async function adminUpdateQuizStatusInFirestore(
+  quizId: string,
+  status: 'draft' | 'published' | 'disabled'
+): Promise<void> {
+  const quizRef = doc(db, 'quizzes', quizId);
+  try {
+    await updateDoc(quizRef, {
+      status,
+      isPublished: status === 'published',
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, `quizzes/${quizId}`);
+  }
 }
 
 export async function adminDeleteQuizFromFirestore(quizId: string): Promise<void> {
@@ -401,7 +445,7 @@ export async function adminDeleteQuizAttemptFromFirestore(attemptId: string): Pr
 
 export async function fetchPublishedQuizzesFromFirestore(): Promise<PublicQuizListItem[]> {
   try {
-    const snap = await getDocs(
+    const snap = await getDocsFromServer(
       query(collection(db, 'quizzes'), where('isPublished', '==', true))
     );
     return snap.docs
@@ -423,7 +467,7 @@ export async function fetchPublishedQuizByIdFromFirestore(quizId: string): Promi
   availability: ReturnType<typeof checkQuizAvailability> | null;
 }> {
   try {
-    const snap = await getDoc(doc(db, 'quizzes', quizId));
+    const snap = await getDocFromServer(doc(db, 'quizzes', quizId));
     if (!snap.exists()) {
       return { quiz: null, availability: null };
     }

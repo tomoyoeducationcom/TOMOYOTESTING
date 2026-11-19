@@ -3,6 +3,7 @@ import type { User } from 'firebase/auth';
 import {
   ArrowDown,
   ArrowUp,
+  Check,
   CheckCircle2,
   Copy,
   Download,
@@ -10,8 +11,13 @@ import {
   Eye,
   Image as ImageIcon,
   Link2,
+  Phone,
   Plus,
+  RefreshCw,
   Search,
+  Send,
+  Star,
+  Target,
   Trash2,
   Users,
   X,
@@ -19,18 +25,22 @@ import {
 import { uploadImageToCloudinary } from '../lib/cloudinary';
 import {
   buildAllQuizAttemptsCsv,
+  buildDefaultQuizWaMessage,
   buildQuizAttemptsCsv,
+  isValidWaTarget,
   type QuizAttemptRecord,
   type QuizDefinition,
   type QuizQuestion,
   type QuizQuestionType,
   type QuizStatus,
+  type WaGroupRecord,
 } from '../lib/quizAndWaDomain';
 import {
   adminDeleteQuizAttemptFromFirestore,
   adminDeleteQuizFromFirestore,
   adminFetchQuizzesAndAttemptsFromFirestore,
   adminSaveQuizToFirestore,
+  adminUpdateQuizStatusInFirestore,
   isFirestorePermissionDeniedError,
   type AdminQuizItem,
 } from '../lib/quizFirestore';
@@ -76,7 +86,7 @@ function createEmptyQuizDraft(): Partial<QuizDefinition> {
     description: '',
     instructions: 'Bacalah setiap soal dengan teliti dan pilih satu jawaban yang paling tepat.',
     targetClass: 'Kelas 1 – 6 SD',
-    status: 'draft',
+    status: 'published',
     timeLimitMinutes: 15,
     maxAttempts: 2,
     startAtIso: '',
@@ -85,13 +95,23 @@ function createEmptyQuizDraft(): Partial<QuizDefinition> {
   };
 }
 
+interface QuizWaSendResultItem {
+  target: string;
+  label: string;
+  kind: 'group' | 'phone';
+  status: string;
+  detail: string;
+}
+
 export function AdminQuizPanel({ user }: { user: User }) {
   const [quizzes, setQuizzes] = useState<AdminQuizItem[]>([]);
   const [allAttempts, setAllAttempts] = useState<QuizAttemptRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  const [lastSavedQuiz, setLastSavedQuiz] = useState<AdminQuizItem | null>(null);
   const [deletingQuizId, setDeletingQuizId] = useState<string | null>(null);
+  const [togglingStatusQuizId, setTogglingStatusQuizId] = useState<string | null>(null);
   const [confirmDeleteAttemptId, setConfirmDeleteAttemptId] = useState<string | null>(null);
   const [deletingAttemptId, setDeletingAttemptId] = useState<string | null>(null);
 
@@ -100,18 +120,94 @@ export function AdminQuizPanel({ user }: { user: User }) {
   const [filterClass, setFilterClass] = useState<string>('all');
   const [searchStudent, setSearchStudent] = useState<string>('');
 
+  // WhatsApp Groups state (synced from Fonnte backend)
+  const [waGroups, setWaGroups] = useState<WaGroupRecord[]>([]);
+  const [waGroupsLoading, setWaGroupsLoading] = useState(false);
+  const [waGroupsSyncing, setWaGroupsSyncing] = useState(false);
+  const [waGroupsNote, setWaGroupsNote] = useState<string | null>(null);
+
   // Editor state
   const [editingDraft, setEditingDraft] = useState<Partial<QuizDefinition> | null>(null);
   const [saving, setSaving] = useState(false);
   const [editorErrors, setEditorErrors] = useState<string[]>([]);
-  const [notifyTarget, setNotifyTarget] = useState('');
+  const [editorGroupIds, setEditorGroupIds] = useState<string[]>([]);
+  const [editorSinglePhone, setEditorSinglePhone] = useState('');
   const [uploadingQuestionIdx, setUploadingQuestionIdx] = useState<number | null>(null);
   const [questionImageError, setQuestionImageError] = useState<Record<string, string>>({});
   const [urlInputOpen, setUrlInputOpen] = useState<Record<string, boolean>>({});
 
+  // Dedicated Send Quiz to WhatsApp Modal state
+  const [shareQuiz, setShareQuiz] = useState<AdminQuizItem | null>(null);
+  const [shareGroupIds, setShareGroupIds] = useState<string[]>([]);
+  const [shareSinglePhone, setShareSinglePhone] = useState('');
+  const [shareMessage, setShareMessage] = useState('');
+  const [sharePublishBeforeSend, setSharePublishBeforeSend] = useState(true);
+  const [shareSending, setShareSending] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareResults, setShareResults] = useState<{
+    fonnteConfigured: boolean;
+    sentCount: number;
+    failedCount: number;
+    items: QuizWaSendResultItem[];
+  } | null>(null);
+
   // Results review state
   const [selectedAttempt, setSelectedAttempt] = useState<QuizAttemptRecord | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const loadWaGroups = useCallback(async () => {
+    setWaGroupsLoading(true);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch('/api/admin/wa-groups', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { groups?: WaGroupRecord[] };
+        setWaGroups(Array.isArray(data.groups) ? data.groups : []);
+      }
+    } catch {
+      // Ignore if backend WA groups not loaded yet
+    } finally {
+      setWaGroupsLoading(false);
+    }
+  }, [user]);
+
+  const handleSyncWaGroups = async () => {
+    setWaGroupsSyncing(true);
+    setWaGroupsNote(null);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch('/api/admin/wa-groups/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ triggerFetchGroup: true }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        detail?: string;
+        groups?: WaGroupRecord[];
+      };
+      if (Array.isArray(data.groups)) {
+        setWaGroups(data.groups);
+      }
+      setWaGroupsNote(
+        data.detail ||
+          (data.ok
+            ? 'Daftar grup WhatsApp berhasil disinkronkan dari Fonnte.'
+            : 'Sinkronisasi grup Fonnte belum berhasil.')
+      );
+    } catch (err) {
+      setWaGroupsNote(
+        err instanceof Error ? err.message : 'Gagal menyinkronkan daftar grup WhatsApp.'
+      );
+    } finally {
+      setWaGroupsSyncing(false);
+    }
+  };
 
   const loadQuizzes = useCallback(async () => {
     setLoading(true);
@@ -135,8 +231,9 @@ export function AdminQuizPanel({ user }: { user: User }) {
   }, []);
 
   useEffect(() => {
-    loadQuizzes();
-  }, [loadQuizzes]);
+    void loadQuizzes();
+    void loadWaGroups();
+  }, [loadQuizzes, loadWaGroups]);
 
   const availableClasses = useMemo(() => {
     const map = new Map<string, string>();
@@ -173,12 +270,28 @@ export function AdminQuizPanel({ user }: { user: User }) {
     return Math.round(total / filteredAttempts.length);
   }, [filteredAttempts]);
 
+  const sortedWaGroups = useMemo(
+    () => [...waGroups].sort((a, b) => Number(b.pinned) - Number(a.pinned)),
+    [waGroups]
+  );
+
   const handleSaveQuiz = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingDraft) return;
+
+    const trimmedPhone = editorSinglePhone.trim();
+    if (trimmedPhone) {
+      const check = isValidWaTarget(trimmedPhone);
+      if (!check.valid || check.isGroupId) {
+        setEditorErrors(['Format 1 nomor WhatsApp tujuan tidak valid (gunakan 08... atau 628...).']);
+        return;
+      }
+    }
+
     setSaving(true);
     setEditorErrors([]);
     setBanner(null);
+    setLastSavedQuiz(null);
     try {
       const saved = await adminSaveQuizToFirestore(editingDraft);
       if (!saved.ok || !saved.quiz) {
@@ -186,10 +299,14 @@ export function AdminQuizPanel({ user }: { user: User }) {
         return;
       }
 
-      if (saved.quiz.status === 'published' && notifyTarget.trim()) {
+      let waSummary = '';
+      if (
+        saved.quiz.status === 'published' &&
+        (editorGroupIds.length > 0 || trimmedPhone.length > 0)
+      ) {
         try {
           const token = await user.getIdToken();
-          await fetch(`/api/admin/quizzes/${encodeURIComponent(saved.quiz.id)}/notify`, {
+          const res = await fetch(`/api/admin/quizzes/${encodeURIComponent(saved.quiz.id)}/send-wa`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -198,17 +315,42 @@ export function AdminQuizPanel({ user }: { user: User }) {
             body: JSON.stringify({
               title: saved.quiz.title,
               targetClass: saved.quiz.targetClass,
-              notifyTarget: notifyTarget.trim(),
+              questionCount: saved.quiz.questions.length,
+              timeLimitMinutes: saved.quiz.timeLimitMinutes,
+              groupIds: editorGroupIds,
+              singlePhone: trimmedPhone || undefined,
             }),
           });
+          const waData = (await res.json()) as {
+            ok?: boolean;
+            sentCount?: number;
+            failedCount?: number;
+            error?: string;
+          };
+          if (waData.ok) {
+            waSummary = ` · Pengiriman WA: ${waData.sentCount ?? 0} berhasil, ${waData.failedCount ?? 0} gagal.`;
+          } else {
+            waSummary = ` · Catatan WA: ${waData.error || 'Pengiriman WA belum berhasil.'}`;
+          }
         } catch {
-          // Notification failure should not block quiz persistence
+          waSummary = ' · Catatan WA: Gagal menghubungi endpoint Fonnte.';
         }
       }
 
+      const savedAsItem: AdminQuizItem = {
+        ...saved.quiz,
+        attemptCount:
+          quizzes.find((q) => q.id === saved.quiz?.id)?.attemptCount ?? 0,
+      };
       setEditingDraft(null);
-      setNotifyTarget('');
-      setBanner(`Kuis "${saved.quiz.title}" berhasil disimpan permanen ke Firestore.`);
+      setEditorGroupIds([]);
+      setEditorSinglePhone('');
+      setLastSavedQuiz(savedAsItem);
+      setBanner(
+        `Kuis "${saved.quiz.title}" (${
+          saved.quiz.status === 'published' ? 'Terbit & tampil di /kuis' : 'Draf'
+        }) berhasil disimpan permanen ke Firestore${waSummary}`
+      );
       await loadQuizzes();
     } catch (err) {
       if (isFirestorePermissionDeniedError(err)) {
@@ -223,6 +365,119 @@ export function AdminQuizPanel({ user }: { user: User }) {
     }
   };
 
+  const handleToggleQuizStatus = async (quiz: AdminQuizItem) => {
+    if (togglingStatusQuizId) return;
+    const nextStatus: QuizStatus = quiz.status === 'published' ? 'draft' : 'published';
+    setTogglingStatusQuizId(quiz.id);
+    setError(null);
+    setBanner(null);
+    try {
+      await adminUpdateQuizStatusInFirestore(quiz.id, nextStatus);
+      setBanner(
+        nextStatus === 'published'
+          ? `Kuis "${quiz.title}" telah diterbitkan dan sekarang tampil di halaman /kuis.`
+          : `Kuis "${quiz.title}" diubah menjadi Draf (disembunyikan dari halaman /kuis).`
+      );
+      await loadQuizzes();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal memperbarui status kuis.');
+    } finally {
+      setTogglingStatusQuizId(null);
+    }
+  };
+
+  const openShareQuizModal = (quiz: AdminQuizItem) => {
+    const quizUrl = `${window.location.origin}/kuis/${quiz.id}`;
+    setShareQuiz(quiz);
+    setShareGroupIds([]);
+    setShareSinglePhone('');
+    setShareMessage(
+      buildDefaultQuizWaMessage({
+        title: quiz.title,
+        targetClass: quiz.targetClass,
+        questionCount: quiz.questions.length,
+        timeLimitMinutes: quiz.timeLimitMinutes,
+        quizUrl,
+      })
+    );
+    setSharePublishBeforeSend(quiz.status !== 'published');
+    setShareError(null);
+    setShareResults(null);
+    if (waGroups.length === 0) {
+      void loadWaGroups();
+    }
+  };
+
+  const handleSendQuizWa = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!shareQuiz || shareSending) return;
+    setShareError(null);
+    setShareResults(null);
+
+    const trimmedPhone = shareSinglePhone.trim();
+    if (trimmedPhone) {
+      const check = isValidWaTarget(trimmedPhone);
+      if (!check.valid || check.isGroupId) {
+        setShareError('Nomor WhatsApp tidak valid. Masukkan 8–16 digit nomor pribadi (contoh: 082119770700).');
+        return;
+      }
+    }
+
+    if (shareGroupIds.length === 0 && !trimmedPhone) {
+      setShareError('Centang minimal 1 grup WhatsApp atau isi 1 nomor WhatsApp tujuan.');
+      return;
+    }
+
+    setShareSending(true);
+    try {
+      if (sharePublishBeforeSend && shareQuiz.status !== 'published') {
+        await adminUpdateQuizStatusInFirestore(shareQuiz.id, 'published');
+        await loadQuizzes();
+      }
+
+      const token = await user.getIdToken();
+      const res = await fetch(`/api/admin/quizzes/${encodeURIComponent(shareQuiz.id)}/send-wa`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          title: shareQuiz.title,
+          targetClass: shareQuiz.targetClass,
+          questionCount: shareQuiz.questions.length,
+          timeLimitMinutes: shareQuiz.timeLimitMinutes,
+          groupIds: shareGroupIds,
+          singlePhone: trimmedPhone || undefined,
+          message: shareMessage.trim() || undefined,
+        }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        fonnteConfigured?: boolean;
+        sentCount?: number;
+        failedCount?: number;
+        results?: QuizWaSendResultItem[];
+      };
+
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Gagal mengirim kuis ke WhatsApp.');
+      }
+
+      setShareResults({
+        fonnteConfigured: Boolean(data.fonnteConfigured),
+        sentCount: data.sentCount ?? 0,
+        failedCount: data.failedCount ?? 0,
+        items: Array.isArray(data.results) ? data.results : [],
+      });
+    } catch (err) {
+      setShareError(err instanceof Error ? err.message : 'Gagal mengirim kuis ke WhatsApp.');
+    } finally {
+      setShareSending(false);
+    }
+  };
+
   const handleDeleteQuiz = async (quiz: AdminQuizItem) => {
     if (deletingQuizId) return;
     setDeletingQuizId(quiz.id);
@@ -232,6 +487,7 @@ export function AdminQuizPanel({ user }: { user: User }) {
       await adminDeleteQuizFromFirestore(quiz.id);
       if (filterQuizId === quiz.id) setFilterQuizId('all');
       if (selectedAttempt?.quizId === quiz.id) setSelectedAttempt(null);
+      if (lastSavedQuiz?.id === quiz.id) setLastSavedQuiz(null);
       setBanner(`Kuis "${quiz.title}" telah dihapus permanen dari Firestore.`);
       await loadQuizzes();
     } catch (err) {
@@ -383,22 +639,35 @@ export function AdminQuizPanel({ user }: { user: User }) {
             Manajemen Kuis Online Siswa
           </h2>
           <p className="text-xs sm:text-sm text-[#3F4A59] mt-0.5">
-            Buat soal pilihan ganda &amp; benar/salah, atur jadwal dan durasi, pantau hasil peserta, serta ekspor rekap CSV.
+            Buat soal pilihan ganda &amp; benar/salah, terbitkan ke halaman siswa, kirim ke grup WA pilihan &amp; nomor WA, serta ekspor rekap nilai CSV.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setEditorErrors([]);
-            setQuestionImageError({});
-            setUrlInputOpen({});
-            setEditingDraft(createEmptyQuizDraft());
-          }}
-          className="inline-flex items-center justify-center gap-2 px-5 py-3 min-h-[44px] text-sm font-semibold text-white bg-[#BE123C] hover:bg-[#9F1239] rounded-xl transition-colors cursor-pointer shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Buat Kuis Baru</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => void loadQuizzes()}
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-3 min-h-[44px] text-xs font-semibold text-[#121820] bg-[#EFECE4] hover:bg-[#DFDCD3] rounded-xl transition-colors cursor-pointer disabled:opacity-60"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Muat Ulang</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setEditorErrors([]);
+              setQuestionImageError({});
+              setUrlInputOpen({});
+              setEditorGroupIds([]);
+              setEditorSinglePhone('');
+              setEditingDraft(createEmptyQuizDraft());
+            }}
+            className="inline-flex items-center justify-center gap-2 px-5 py-3 min-h-[44px] text-sm font-semibold text-white bg-[#BE123C] hover:bg-[#9F1239] rounded-xl transition-colors cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Buat Kuis Baru</span>
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -423,8 +692,18 @@ export function AdminQuizPanel({ user }: { user: User }) {
       </div>
 
       {banner && (
-        <div role="status" className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-sm text-emerald-900">
-          {banner}
+        <div role="status" className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-sm text-emerald-900 flex flex-wrap items-center justify-between gap-3">
+          <span>{banner}</span>
+          {lastSavedQuiz && (
+            <button
+              type="button"
+              onClick={() => openShareQuizModal(lastSavedQuiz)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-[#0F766E] hover:bg-[#115E59] rounded-xl cursor-pointer shrink-0"
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span>Kirim ke Grup WA / 1 Nomor</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -574,20 +853,116 @@ export function AdminQuizPanel({ user }: { user: User }) {
           </div>
 
           {editingDraft.status === 'published' && (
-            <div className="p-4 rounded-xl editorial-card-subtle space-y-2">
-              <label className="block text-xs font-semibold text-[#121820]">
-                Target Notifikasi Otomatis Saat Terbit (Opsional — Grup ID `...@g.us` atau Nomor WA)
-              </label>
-              <input
-                type="text"
-                value={notifyTarget}
-                onChange={(e) => setNotifyTarget(e.target.value)}
-                placeholder="Kosongkan jika tidak ingin mengirim otomatis sekarang"
-                className="w-full px-3.5 py-2.5 min-h-[42px] text-xs font-mono bg-white border border-[#DFDCD3] rounded-xl"
-              />
-              <p className="text-[11px] text-[#626E7E]">
-                Notifikasi otomatis hanya dikirim jika fitur otomatis Kuis Online diaktifkan di menu WhatsApp Center → Pengaturan.
-              </p>
+            <div className="p-4 sm:p-5 rounded-xl editorial-card-subtle space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Target className="w-4 h-4 text-[#BE123C]" />
+                  <p className="text-xs sm:text-sm font-bold text-[#121820]">
+                    Kirim Otomatis Saat Disimpan (Opsional — Grup WA Pilihan &amp; 1 Nomor)
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={waGroupsSyncing}
+                  onClick={() => void handleSyncWaGroups()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#121820] bg-white border border-[#DFDCD3] hover:border-[#121820] rounded-lg cursor-pointer disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-3 h-3 ${waGroupsSyncing ? 'animate-spin' : ''}`} />
+                  <span>Sync Grup Fonnte</span>
+                </button>
+              </div>
+
+              {waGroupsNote && (
+                <p className="text-xs text-[#3F4A59] bg-white border border-[#DFDCD3] rounded-lg px-3 py-2">
+                  {waGroupsNote}
+                </p>
+              )}
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-[#3F4A59]">
+                      Pilih Grup WA (Centang dengan ikon scope)
+                    </span>
+                    {sortedWaGroups.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditorGroupIds(
+                            editorGroupIds.length === sortedWaGroups.length
+                              ? []
+                              : sortedWaGroups.map((g) => g.id)
+                          )
+                        }
+                        className="text-xs font-semibold text-[#BE123C] cursor-pointer"
+                      >
+                        {editorGroupIds.length === sortedWaGroups.length ? 'Batal Semua' : 'Pilih Semua'}
+                      </button>
+                    )}
+                  </div>
+                  {waGroupsLoading ? (
+                    <p className="text-xs text-[#626E7E]">Memuat daftar grup WhatsApp...</p>
+                  ) : sortedWaGroups.length === 0 ? (
+                    <p className="text-xs text-[#626E7E] bg-white border border-[#DFDCD3] rounded-xl p-3">
+                      Belum ada daftar grup tersimpan. Klik <strong>Sync Grup Fonnte</strong> atau gunakan menu <strong>Kirim ke WA</strong> setelah kuis tersimpan.
+                    </p>
+                  ) : (
+                    <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
+                      {sortedWaGroups.map((g) => {
+                        const checked = editorGroupIds.includes(g.id);
+                        return (
+                          <label
+                            key={g.id}
+                            className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-xs cursor-pointer transition-colors ${
+                              checked
+                                ? 'bg-[#121820] text-white border-[#121820]'
+                                : 'bg-white text-[#121820] border-[#DFDCD3] hover:border-[#121820]'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() =>
+                                setEditorGroupIds((prev) =>
+                                  checked ? prev.filter((id) => id !== g.id) : [...prev, g.id]
+                                )
+                              }
+                              className="sr-only"
+                            />
+                            <span
+                              className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 border ${
+                                checked
+                                  ? 'bg-[#BE123C] border-[#BE123C] text-white'
+                                  : 'bg-[#F7F6F2] border-[#DFDCD3] text-[#626E7E]'
+                              }`}
+                            >
+                              {checked ? <Check className="w-3.5 h-3.5" /> : <Target className="w-3.5 h-3.5" />}
+                            </span>
+                            <span className="font-semibold truncate flex-1">{g.name}</span>
+                            {g.pinned && <Star className="w-3.5 h-3.5 text-amber-400 fill-current shrink-0" />}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-xs font-semibold text-[#3F4A59]">
+                    Kirim ke 1 Nomor WhatsApp (Opsional)
+                  </label>
+                  <input
+                    type="tel"
+                    value={editorSinglePhone}
+                    onChange={(e) => setEditorSinglePhone(e.target.value)}
+                    placeholder="Contoh: 082119770700 atau 6282119770700"
+                    className="w-full px-3.5 py-2.5 min-h-[42px] text-xs font-mono bg-white border border-[#DFDCD3] rounded-xl"
+                  />
+                  <p className="text-[11px] text-[#626E7E]">
+                    Anda juga dapat mengirim atau menyebarkan kuis ini kapan saja melalui tombol <strong>Kirim ke WA</strong> pada daftar kuis.
+                  </p>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1153,6 +1528,32 @@ export function AdminQuizPanel({ user }: { user: User }) {
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
                   <button
                     type="button"
+                    onClick={() => openShareQuizModal(q)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-[#0F766E] hover:bg-[#115E59] rounded-xl cursor-pointer"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Kirim ke WA</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={togglingStatusQuizId === q.id}
+                    onClick={() => void handleToggleQuizStatus(q)}
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border cursor-pointer disabled:opacity-50 ${
+                      q.status === 'published'
+                        ? 'text-amber-800 bg-amber-50 border-amber-200 hover:bg-amber-100'
+                        : 'text-[#15803D] bg-emerald-50 border-emerald-200 hover:bg-emerald-100'
+                    }`}
+                  >
+                    <span>
+                      {togglingStatusQuizId === q.id
+                        ? '...'
+                        : q.status === 'published'
+                        ? 'Jadikan Draf'
+                        : 'Terbitkan'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => handleCopyLink(q.id)}
                     className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#121820] bg-white border border-[#DFDCD3] hover:border-[#121820] rounded-xl cursor-pointer"
                   >
@@ -1181,6 +1582,8 @@ export function AdminQuizPanel({ user }: { user: User }) {
                       setEditorErrors([]);
                       setQuestionImageError({});
                       setUrlInputOpen({});
+                      setEditorGroupIds([]);
+                      setEditorSinglePhone('');
                       setEditingDraft(q);
                     }}
                     className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-[#121820] hover:bg-[#BE123C] rounded-xl cursor-pointer"
@@ -1203,6 +1606,275 @@ export function AdminQuizPanel({ user }: { user: User }) {
           </div>
         )}
       </div>
+
+      {/* SEND QUIZ TO WHATSAPP GROUPS (SCOPE CHECKBOXES) & SINGLE PHONE MODAL */}
+      {shareQuiz && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Kirim Kuis ke WhatsApp"
+        >
+          <form
+            onSubmit={handleSendQuizWa}
+            className="editorial-card rounded-2xl max-w-2xl w-full p-6 space-y-5 max-h-[92vh] overflow-y-auto shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-3 pb-4 border-b border-[#DFDCD3]">
+              <div>
+                <p className="text-xs font-semibold text-[#BE123C] uppercase tracking-wider flex items-center gap-1.5">
+                  <Target className="w-3.5 h-3.5" />
+                  <span>Distribusi Kuis Online via Fonnte</span>
+                </p>
+                <h3 className="font-display text-2xl font-bold text-[#121820] mt-0.5">
+                  Kirim Kuis ke WhatsApp
+                </h3>
+                <p className="text-xs text-[#3F4A59] mt-0.5">
+                  Kuis: <strong>{shareQuiz.title}</strong> ({shareQuiz.targetClass})
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShareQuiz(null)}
+                aria-label="Tutup modal kirim kuis"
+                className="p-2 rounded-xl bg-[#EFECE4] hover:bg-[#DFDCD3] text-[#121820] cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {shareQuiz.status !== 'published' && (
+              <label className="flex items-start gap-2.5 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-950 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={sharePublishBeforeSend}
+                  onChange={(e) => setSharePublishBeforeSend(e.target.checked)}
+                  className="mt-0.5 accent-[#BE123C]"
+                />
+                <span>
+                  Kuis ini masih berstatus <strong>{shareQuiz.status === 'draft' ? 'Draf' : 'Nonaktif'}</strong>. Terbitkan kuis otomatis saat mengirim agar tautan dapat langsung dibuka siswa di halaman <code className="font-mono">/kuis</code>.
+                </span>
+              </label>
+            )}
+
+            {shareError && (
+              <div role="alert" className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-xs sm:text-sm text-[#B91C1C]">
+                {shareError}
+              </div>
+            )}
+
+            {/* 1. CHECKABLE WHATSAPP GROUPS WITH SCOPE ICON */}
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-bold text-[#121820]">
+                  <Target className="w-4 h-4 text-[#BE123C]" />
+                  <span>1. Pilih Grup WhatsApp (Centang Target Scope · {shareGroupIds.length} dipilih)</span>
+                </span>
+                <div className="flex items-center gap-2">
+                  {sortedWaGroups.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShareGroupIds(
+                          shareGroupIds.length === sortedWaGroups.length
+                            ? []
+                            : sortedWaGroups.map((g) => g.id)
+                        )
+                      }
+                      className="text-xs font-semibold text-[#BE123C] cursor-pointer"
+                    >
+                      {shareGroupIds.length === sortedWaGroups.length ? 'Batal Semua' : 'Pilih Semua'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={waGroupsSyncing}
+                    onClick={() => void handleSyncWaGroups()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#121820] bg-[#EFECE4] hover:bg-[#DFDCD3] rounded-lg cursor-pointer disabled:opacity-60"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${waGroupsSyncing ? 'animate-spin' : ''}`} />
+                    <span>Sync Grup Fonnte</span>
+                  </button>
+                </div>
+              </div>
+
+              {waGroupsNote && (
+                <p className="text-xs text-[#3F4A59] bg-[#F7F6F2] border border-[#DFDCD3] rounded-xl px-3.5 py-2">
+                  {waGroupsNote}
+                </p>
+              )}
+
+              {waGroupsLoading ? (
+                <p className="text-xs text-[#626E7E]">Memuat daftar grup WhatsApp tersimpan...</p>
+              ) : sortedWaGroups.length === 0 ? (
+                <div className="p-4 rounded-xl bg-[#F7F6F2] border border-[#DFDCD3] text-xs text-[#626E7E] space-y-1">
+                  <p className="font-semibold text-[#121820]">Belum ada grup WhatsApp yang tersinkron.</p>
+                  <p>
+                    Klik tombol <strong>Sync Grup Fonnte</strong> di atas (pastikan <code className="font-mono">FONNTE_TOKEN</code> aktif di server), atau isi 1 nomor WhatsApp tujuan di bagian bawah.
+                  </p>
+                </div>
+              ) : (
+                <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
+                  {sortedWaGroups.map((g) => {
+                    const checked = shareGroupIds.includes(g.id);
+                    return (
+                      <label
+                        key={g.id}
+                        className={`flex items-center gap-3 p-3 rounded-xl border transition-colors cursor-pointer ${
+                          checked
+                            ? 'bg-[#121820] text-white border-[#121820]'
+                            : 'bg-[#F7F6F2] text-[#121820] border-[#DFDCD3] hover:border-[#121820]'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() =>
+                            setShareGroupIds((prev) =>
+                              checked ? prev.filter((id) => id !== g.id) : [...prev, g.id]
+                            )
+                          }
+                          aria-label={`Pilih grup ${g.name}`}
+                          className="sr-only"
+                        />
+                        <span
+                          aria-hidden="true"
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border transition-colors ${
+                            checked
+                              ? 'bg-[#BE123C] border-[#BE123C] text-white'
+                              : 'bg-white border-[#DFDCD3] text-[#626E7E]'
+                          }`}
+                        >
+                          {checked ? <Check className="w-4 h-4" /> : <Target className="w-4 h-4" />}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs sm:text-sm font-bold truncate">{g.name}</p>
+                          <p
+                            className={`text-[11px] font-mono truncate ${
+                              checked ? 'text-slate-300' : 'text-[#626E7E]'
+                            }`}
+                          >
+                            {g.id}
+                          </p>
+                        </div>
+                        {g.pinned && (
+                          <Star className="w-4 h-4 text-amber-400 fill-current shrink-0" />
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* 2. SEND TO 1 PHONE NUMBER */}
+            <div className="space-y-2 pt-2 border-t border-[#DFDCD3]">
+              <label
+                htmlFor="quiz-share-single-phone"
+                className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-[#121820]"
+              >
+                <Phone className="w-4 h-4 text-[#0F766E]" />
+                <span>2. Kirim ke 1 Nomor WhatsApp (Opsional)</span>
+              </label>
+              <input
+                id="quiz-share-single-phone"
+                type="tel"
+                value={shareSinglePhone}
+                onChange={(e) => setShareSinglePhone(e.target.value)}
+                placeholder="Contoh: 082119770700 atau 6282119770700"
+                className="w-full px-3.5 py-2.5 min-h-[44px] text-sm font-mono bg-white border border-[#DFDCD3] rounded-xl focus:outline-none focus:border-[#121820]"
+              />
+              {shareSinglePhone.trim() && (() => {
+                const check = isValidWaTarget(shareSinglePhone.trim());
+                if (!check.valid || check.isGroupId) {
+                  return (
+                    <p className="text-[11px] text-[#B91C1C]">
+                      Format nomor tidak valid (masukkan 8–16 digit nomor WhatsApp pribadi).
+                    </p>
+                  );
+                }
+                return (
+                  <p className="text-[11px] text-[#15803D] font-mono">
+                    Format valid · Target: {check.normalized}
+                  </p>
+                );
+              })()}
+            </div>
+
+            {/* 3. MESSAGE PREVIEW & EDIT */}
+            <div className="space-y-2 pt-2 border-t border-[#DFDCD3]">
+              <label
+                htmlFor="quiz-share-message"
+                className="block text-xs sm:text-sm font-bold text-[#121820]"
+              >
+                3. Isi Pesan Undangan Kuis
+              </label>
+              <textarea
+                id="quiz-share-message"
+                rows={6}
+                value={shareMessage}
+                onChange={(e) => setShareMessage(e.target.value)}
+                className="w-full px-3.5 py-2.5 text-xs sm:text-sm bg-white border border-[#DFDCD3] rounded-xl focus:outline-none focus:border-[#121820]"
+              />
+            </div>
+
+            {shareResults && (
+              <div className="p-4 rounded-xl bg-[#F7F6F2] border border-[#DFDCD3] space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="font-bold text-[#121820]">Hasil Pengiriman WhatsApp</span>
+                  <span className="font-mono font-bold">
+                    <span className="text-[#15803D]">{shareResults.sentCount} Berhasil</span>
+                    {' · '}
+                    <span className="text-[#B91C1C]">{shareResults.failedCount} Gagal</span>
+                  </span>
+                </div>
+                <div className="space-y-1.5">
+                  {shareResults.items.map((item) => (
+                    <div
+                      key={item.target}
+                      className={`p-2.5 rounded-lg border text-xs flex flex-col gap-0.5 ${
+                        item.status === 'sent'
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                          : 'bg-rose-50 border-rose-200 text-[#B91C1C]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 font-semibold">
+                        <span>{item.label}</span>
+                        <span className="uppercase font-mono">{item.status}</span>
+                      </div>
+                      <span className="text-[11px] opacity-90">{item.detail}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-end gap-3 pt-3 border-t border-[#DFDCD3]">
+              <button
+                type="button"
+                onClick={() => setShareQuiz(null)}
+                className="px-4 py-2.5 min-h-[42px] text-xs font-semibold text-[#3F4A59] bg-[#EFECE4] hover:bg-[#DFDCD3] rounded-xl cursor-pointer"
+              >
+                Tutup
+              </button>
+              <button
+                type="submit"
+                disabled={
+                  shareSending ||
+                  (shareGroupIds.length === 0 && !shareSinglePhone.trim())
+                }
+                className="inline-flex items-center gap-2 px-5 py-2.5 min-h-[44px] text-xs sm:text-sm font-semibold text-white bg-[#BE123C] hover:bg-[#9F1239] rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <Send className="w-4 h-4" />
+                <span>
+                  {shareSending
+                    ? 'Mengirim via Fonnte...'
+                    : `Kirim Sekarang (${shareGroupIds.length + (shareSinglePhone.trim() ? 1 : 0)} Target)`}
+                </span>
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

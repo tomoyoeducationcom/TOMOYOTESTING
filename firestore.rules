@@ -497,7 +497,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'studentId', 'parentId', 'childName', 'amount', 'method',
-          'periodLabel', 'status', 'notes', 'recordedBy', 'updatedAt'
+          'periodLabel', 'dueDateIso', 'status', 'notes', 'recordedBy', 'updatedAt'
         ]);
       allow delete: if isValidId(paymentId) && isAdmin();
     }

@@ -11,6 +11,7 @@ import {
   WA_TEMPLATE_VARIABLES,
   buildAllQuizAttemptsCsv,
   buildCampaignReportCsv,
+  buildDefaultQuizWaMessage,
   buildQuizAttemptsCsv,
   checkQuizAvailability,
   computeQuestionAnswerHash,
@@ -21,6 +22,7 @@ import {
   parseContactsCsvText,
   recalculateCampaignCounts,
   renderTemplateVariables,
+  resolveQuizWaTargets,
   toStudentSafeQuiz,
   validateQuizPayload,
   type QuizAttemptRecord,
@@ -37,6 +39,7 @@ import {
   submitStudentQuizAttempt,
   upsertAdminQuiz,
 } from '../server/quizService';
+import { sendQuizToWaTargets } from '../server/waCenterService';
 
 const TEST_QUIZ_FIXTURE: QuizDefinition = {
   id: 'kuis-uji-matematika',
@@ -558,5 +561,59 @@ test('hash-based grading and stateless HMAC session tokens validate accurately w
     if (prevSubmitted !== null) fs.writeFileSync(submittedPath, prevSubmitted, 'utf-8');
     else if (fs.existsSync(submittedPath)) fs.unlinkSync(submittedPath);
   }
+});
+
+test('resolveQuizWaTargets and sendQuizToWaTargets support checked WA groups and 1 single phone number', async () => {
+  const emptyRes = resolveQuizWaTargets([], '');
+  assert.equal(emptyRes.ok, false);
+
+  const invalidPhone = resolveQuizWaTargets([], '123');
+  assert.equal(invalidPhone.ok, false);
+
+  const groupIdInPhoneField = resolveQuizWaTargets([], '1203630123456@g.us');
+  assert.equal(groupIdInPhoneField.ok, false);
+
+  const validBoth = resolveQuizWaTargets(
+    ['1203630111111@g.us', '1203630111111@g.us', '1203630222222@g.us'],
+    '082119770700'
+  );
+  assert.equal(validBoth.ok, true);
+  assert.equal(validBoth.targets.length, 3);
+  assert.deepEqual(validBoth.targets[0], { target: '1203630111111@g.us', kind: 'group' });
+  assert.deepEqual(validBoth.targets[1], { target: '1203630222222@g.us', kind: 'group' });
+  assert.deepEqual(validBoth.targets[2], { target: '6282119770700', kind: 'phone' });
+
+  const singleOnly = resolveQuizWaTargets([], '081996284733');
+  assert.equal(singleOnly.ok, true);
+  assert.equal(singleOnly.targets.length, 1);
+  assert.deepEqual(singleOnly.targets[0], { target: '6281996284733', kind: 'phone' });
+
+  const msg = buildDefaultQuizWaMessage({
+    title: 'Kuis Matematika Bab 1',
+    targetClass: 'Kelas 5 SD',
+    questionCount: 10,
+    timeLimitMinutes: 20,
+    quizUrl: 'https://tomoyotesting.vercel.app/kuis/kuis-123',
+  });
+  assert.ok(msg.includes('Kuis Matematika Bab 1'));
+  assert.ok(msg.includes('10 Soal · 20 Menit'));
+  assert.ok(msg.includes('https://tomoyotesting.vercel.app/kuis/kuis-123'));
+
+  const dispatchRes = await sendQuizToWaTargets({
+    quizId: 'kuis-test-wa',
+    title: 'Kuis IPA',
+    targetClass: 'Kelas 4 SD',
+    questionCount: 5,
+    timeLimitMinutes: 10,
+    groupIds: ['1203630999999@g.us'],
+    singlePhone: '082119770700',
+    baseUrl: 'https://tomoyotesting.vercel.app',
+    sentByEmail: 'tomoyoeducation.com@gmail.com',
+  });
+  assert.equal(dispatchRes.ok, true);
+  assert.equal(dispatchRes.results.length, 2);
+  assert.equal(dispatchRes.results[0].kind, 'group');
+  assert.equal(dispatchRes.results[1].kind, 'phone');
+  assert.equal(dispatchRes.results[1].target, '6282119770700');
 });
 

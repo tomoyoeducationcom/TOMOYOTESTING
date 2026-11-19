@@ -86,34 +86,55 @@ function QuizDirectoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setError(null);
+  const loadPublishedQuizzes = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const list = await fetchPublishedQuizzesFromFirestore();
+      if (list.length > 0) {
+        setQuizzes(list);
+        return;
+      }
+      // Cross-check backend REST Firestore query in case client network/cache lag occurs
       try {
-        const list = await fetchPublishedQuizzesFromFirestore();
-        if (!cancelled) {
-          setQuizzes(list);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          if (isFirestorePermissionDeniedError(err)) {
-            setError(
-              'Kuis belum dapat dimuat karena aturan Firestore belum diperbarui. Silakan hubungi admin TOMOYO Education.'
-            );
-          } else {
-            setError(err instanceof Error ? err.message : 'Gagal memuat daftar kuis.');
+        const res = await fetch('/api/quizzes', { cache: 'no-store' });
+        if (res.ok) {
+          const data = (await res.json()) as { quizzes?: PublicQuizListItem[] };
+          if (Array.isArray(data.quizzes) && data.quizzes.length > 0) {
+            setQuizzes(data.quizzes);
+            return;
           }
         }
-      } finally {
-        if (!cancelled) setLoading(false);
+      } catch {
+        // Ignore fallback failure when Firestore returned empty cleanly
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+      setQuizzes([]);
+    } catch (err) {
+      if (isFirestorePermissionDeniedError(err)) {
+        setError(
+          'Kuis belum dapat dimuat karena aturan Firestore belum diperbarui. Silakan hubungi admin TOMOYO Education.'
+        );
+      } else {
+        try {
+          const res = await fetch('/api/quizzes', { cache: 'no-store' });
+          if (res.ok) {
+            const data = (await res.json()) as { quizzes?: PublicQuizListItem[] };
+            setQuizzes(Array.isArray(data.quizzes) ? data.quizzes : []);
+            return;
+          }
+        } catch {
+          // ignore
+        }
+        setError(err instanceof Error ? err.message : 'Gagal memuat daftar kuis.');
+      }
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadPublishedQuizzes();
+  }, [loadPublishedQuizzes]);
 
   return (
     <div>
@@ -140,9 +161,17 @@ function QuizDirectoryPage() {
             >
               <AlertCircle className="w-8 h-8 text-[#B91C1C] mx-auto" />
               <p className="text-sm font-semibold text-[#141A23]">{error}</p>
+              <button
+                type="button"
+                onClick={() => void loadPublishedQuizzes()}
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-[#141A23] bg-[#F2EFE9] hover:bg-[#E5E2D9] rounded-xl cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Coba Muat Ulang</span>
+              </button>
             </div>
           ) : quizzes.length === 0 ? (
-            <div className="editorial-card rounded-2xl p-10 text-center max-w-xl mx-auto space-y-3">
+            <div className="editorial-card rounded-2xl p-10 text-center max-w-xl mx-auto space-y-4">
               <BookOpen className="w-10 h-10 text-[#626E7E] mx-auto" />
               <h2 className="font-display text-2xl font-bold text-[#141A23]">
                 Belum Ada Kuis Aktif
@@ -150,6 +179,14 @@ function QuizDirectoryPage() {
               <p className="text-sm text-[#3E4856] leading-relaxed">
                 Daftar kuis latihan online akan tampil di halaman ini setelah diterbitkan oleh pengelola TOMOYO Education.
               </p>
+              <button
+                type="button"
+                onClick={() => void loadPublishedQuizzes()}
+                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-[#141A23] bg-[#F2EFE9] hover:bg-[#E5E2D9] rounded-xl cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Muat Ulang Daftar Kuis</span>
+              </button>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

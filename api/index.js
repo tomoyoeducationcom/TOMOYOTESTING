@@ -543,6 +543,63 @@ function isValidWaTarget(raw) {
   }
   return { valid: true, normalized: digits, isGroupId: false };
 }
+function buildDefaultQuizWaMessage(input) {
+  const title = input.title.trim() || "Kuis Online TOMOYO";
+  const targetClass = (input.targetClass || "Semua Tingkat").trim();
+  const lines = [
+    `*KUIS ONLINE \u2014 ${BRAND_IDENTITY.shortName}*`,
+    "",
+    `Judul Kuis: *${title}*`,
+    `Target Kelas: ${targetClass}`
+  ];
+  if (typeof input.questionCount === "number" && input.questionCount > 0) {
+    const durationLabel = typeof input.timeLimitMinutes === "number" && input.timeLimitMinutes > 0 ? `${input.timeLimitMinutes} Menit` : "Tanpa Batas Waktu";
+    lines.push(`Detail: ${input.questionCount} Soal \xB7 ${durationLabel}`);
+  }
+  lines.push(
+    "",
+    "Silakan kerjakan langsung melalui tautan resmi berikut:",
+    input.quizUrl,
+    "",
+    "Isi nama lengkap dan kelas sebelum mulai mengerjakan. Semangat belajar!"
+  );
+  return lines.join("\n");
+}
+function resolveQuizWaTargets(groupIds, singlePhone) {
+  const seen = /* @__PURE__ */ new Set();
+  const targets = [];
+  for (const rawId of groupIds) {
+    const clean = typeof rawId === "string" ? rawId.trim() : "";
+    if (!clean) continue;
+    if (!seen.has(clean)) {
+      seen.add(clean);
+      targets.push({ target: clean, kind: "group" });
+    }
+  }
+  const trimmedPhone = typeof singlePhone === "string" ? singlePhone.trim() : "";
+  if (trimmedPhone) {
+    const check = isValidWaTarget(trimmedPhone);
+    if (!check.valid || check.isGroupId) {
+      return {
+        ok: false,
+        targets: [],
+        error: check.isGroupId ? "Kolom nomor tujuan hanya untuk 1 nomor WhatsApp pribadi (bukan ID grup)." : check.reason || "Format nomor WhatsApp tujuan tidak valid."
+      };
+    }
+    if (!seen.has(check.normalized)) {
+      seen.add(check.normalized);
+      targets.push({ target: check.normalized, kind: "phone" });
+    }
+  }
+  if (targets.length === 0) {
+    return {
+      ok: false,
+      targets: [],
+      error: "Pilih minimal 1 grup WhatsApp (centang) atau masukkan 1 nomor WhatsApp tujuan."
+    };
+  }
+  return { ok: true, targets };
+}
 function deduplicateAndFilterRecipients(inputs, optOutPhones) {
   const optOutSet = new Set(
     optOutPhones.map((p) => {
@@ -2025,6 +2082,96 @@ async function sendWaGroupAnnouncement(input) {
   saveGroupLogs(logs);
   return { ok: true, log };
 }
+async function sendQuizToWaTargets(input) {
+  const resolved = resolveQuizWaTargets(input.groupIds || [], input.singlePhone);
+  const configured = isFonnteConfigured();
+  if (!resolved.ok) {
+    return {
+      ok: false,
+      error: resolved.error,
+      fonnteConfigured: configured,
+      results: [],
+      sentCount: 0,
+      failedCount: 0
+    };
+  }
+  const cleanBase = input.baseUrl.replace(/\/+$/, "");
+  const quizUrl = `${cleanBase}/kuis/${encodeURIComponent(input.quizId)}`;
+  const message = typeof input.message === "string" && input.message.trim() || buildDefaultQuizWaMessage({
+    title: input.title,
+    targetClass: input.targetClass,
+    questionCount: input.questionCount,
+    timeLimitMinutes: input.timeLimitMinutes,
+    quizUrl
+  });
+  const savedGroups = loadGroups();
+  const results = [];
+  const groupLogResults = [];
+  const groupIdsSent = [];
+  const groupNamesSent = [];
+  for (let i = 0; i < resolved.targets.length; i++) {
+    const item = resolved.targets[i];
+    const matchedGroup = item.kind === "group" ? savedGroups.find((g) => g.id === item.target) : void 0;
+    const label = item.kind === "group" ? matchedGroup?.name || item.target : `Nomor WA ${item.target}`;
+    const delivery = await sendFonnteWhatsApp({
+      target: item.target,
+      message
+    });
+    results.push({
+      target: item.target,
+      label,
+      kind: item.kind,
+      status: delivery.status,
+      detail: delivery.detail
+    });
+    if (item.kind === "group") {
+      groupIdsSent.push(item.target);
+      groupNamesSent.push(label);
+      groupLogResults.push({
+        groupId: item.target,
+        groupName: label,
+        status: delivery.status,
+        detail: delivery.detail
+      });
+    }
+    if (i < resolved.targets.length - 1) {
+      await new Promise((r) => setTimeout(r, 600));
+    }
+  }
+  if (groupIdsSent.length > 0) {
+    const allSent = groupLogResults.every(
+      (r) => r.status === "sent" || r.status === "skipped_duplicate"
+    );
+    const anySent = groupLogResults.some(
+      (r) => r.status === "sent" || r.status === "skipped_duplicate"
+    );
+    const unconfigured = groupLogResults.every((r) => r.status === "unconfigured");
+    const logs = loadGroupLogs();
+    logs.unshift({
+      id: `grplog_quiz_${Date.now()}_${crypto2.randomBytes(2).toString("hex")}`,
+      groupIds: groupIdsSent,
+      groupNames: groupNamesSent,
+      message,
+      status: unconfigured ? "unconfigured" : allSent ? "sent" : anySent ? "partial" : "failed",
+      results: groupLogResults,
+      sentAtIso: (/* @__PURE__ */ new Date()).toISOString(),
+      sentByEmail: input.sentByEmail
+    });
+    saveGroupLogs(logs);
+  }
+  const sentCount = results.filter(
+    (r) => r.status === "sent" || r.status === "skipped_duplicate"
+  ).length;
+  const failedCount = results.length - sentCount;
+  return {
+    ok: true,
+    fonnteConfigured: configured,
+    messageSent: message,
+    results,
+    sentCount,
+    failedCount
+  };
+}
 function loadTemplates() {
   const loaded = readJsonData(WA_TEMPLATES_FILE, null);
   if (!loaded || !Array.isArray(loaded) || loaded.length === 0) {
@@ -2689,6 +2836,31 @@ function createApp() {
     }
     res.json(outcome);
   });
+  app2.post("/api/admin/quizzes/:quizId/send-wa", async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: "Khusus admin terotorisasi." });
+      return;
+    }
+    const body = req.body || {};
+    const result = await sendQuizToWaTargets({
+      quizId: req.params.quizId,
+      title: typeof body.title === "string" ? body.title : "Kuis Online TOMOYO",
+      targetClass: typeof body.targetClass === "string" ? body.targetClass : void 0,
+      questionCount: typeof body.questionCount === "number" ? body.questionCount : void 0,
+      timeLimitMinutes: typeof body.timeLimitMinutes === "number" ? body.timeLimitMinutes : void 0,
+      groupIds: Array.isArray(body.groupIds) ? body.groupIds.map((g) => String(g)) : [],
+      singlePhone: typeof body.singlePhone === "string" ? body.singlePhone : void 0,
+      message: typeof body.message === "string" ? body.message : void 0,
+      baseUrl: resolveBaseUrl(req),
+      sentByEmail: decoded.email || "admin"
+    });
+    if (!result.ok) {
+      res.status(400).json({ error: result.error || "Target pengiriman WhatsApp tidak valid." });
+      return;
+    }
+    res.json(result);
+  });
   app2.post("/api/admin/quizzes/:quizId/notify", async (req, res) => {
     const decoded = await verifyRequestFirebaseToken(req);
     if (!decoded || !isDecodedTokenAdmin(decoded)) {
@@ -2703,29 +2875,14 @@ function createApp() {
       res.status(400).json({ error: "Target WhatsApp dan judul kuis wajib diisi." });
       return;
     }
-    const settings = getWaSettings();
-    let autoDispatch = null;
-    if (settings.autoNotifyQuizPublished) {
-      const templates = listWaTemplates();
-      const tpl = templates.find((t) => t.id === settings.autoQuizTemplateId);
-      const baseUrl = resolveBaseUrl(req);
-      const quizUrl = `${baseUrl}/kuis/${req.params.quizId}`;
-      const rawMsg = tpl?.content || `Kuis Online baru tersedia: *${title}* (${targetClass}). Kerjakan di ${quizUrl}`;
-      const rendered = renderTemplateVariables(rawMsg, {
-        nama_siswa: "Siswa-siswi TOMOYO",
-        nama_orang_tua: "Bapak/Ibu",
-        kelas: targetClass,
-        nama_program: title,
-        jadwal: quizUrl
-      });
-      const target = notifyTarget.endsWith("@g.us") ? notifyTarget : normalizeWhatsappPhone(notifyTarget);
-      if (target) {
-        autoDispatch = await sendFonnteWhatsApp({
-          target,
-          message: rendered.rendered
-        });
-      }
-    }
+    const baseUrl = resolveBaseUrl(req);
+    const quizUrl = `${baseUrl}/kuis/${req.params.quizId}`;
+    const rawMsg = `Kuis Online baru tersedia: *${title}* (${targetClass}). Kerjakan langsung di ${quizUrl}`;
+    const target = notifyTarget.endsWith("@g.us") ? notifyTarget : normalizeWhatsappPhone(notifyTarget);
+    const autoDispatch = target ? await sendFonnteWhatsApp({
+      target,
+      message: rawMsg
+    }) : null;
     res.json({ ok: true, autoDispatch });
   });
   app2.get("/api/admin/quizzes", async (req, res) => {

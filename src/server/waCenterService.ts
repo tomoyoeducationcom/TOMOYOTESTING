@@ -13,9 +13,11 @@ import {
   type WaTemplateRecord,
   WA_TEMPLATE_CATEGORIES,
   buildCampaignReportCsv,
+  buildDefaultQuizWaMessage,
   deduplicateAndFilterRecipients,
   recalculateCampaignCounts,
   renderTemplateVariables,
+  resolveQuizWaTargets,
 } from '../lib/quizAndWaDomain';
 import {
   checkFonnteDeviceStatus,
@@ -175,6 +177,140 @@ export async function sendWaGroupAnnouncement(input: {
   saveGroupLogs(logs);
 
   return { ok: true, log };
+}
+
+export interface QuizWaDispatchResultItem {
+  target: string;
+  label: string;
+  kind: 'group' | 'phone';
+  status: string;
+  detail: string;
+}
+
+export async function sendQuizToWaTargets(input: {
+  quizId: string;
+  title: string;
+  targetClass?: string;
+  questionCount?: number;
+  timeLimitMinutes?: number;
+  groupIds?: string[];
+  singlePhone?: string;
+  message?: string;
+  baseUrl: string;
+  sentByEmail: string;
+}): Promise<{
+  ok: boolean;
+  error?: string;
+  fonnteConfigured: boolean;
+  messageSent?: string;
+  results: QuizWaDispatchResultItem[];
+  sentCount: number;
+  failedCount: number;
+}> {
+  const resolved = resolveQuizWaTargets(input.groupIds || [], input.singlePhone);
+  const configured = isFonnteConfigured();
+  if (!resolved.ok) {
+    return {
+      ok: false,
+      error: resolved.error,
+      fonnteConfigured: configured,
+      results: [],
+      sentCount: 0,
+      failedCount: 0,
+    };
+  }
+
+  const cleanBase = input.baseUrl.replace(/\/+$/, '');
+  const quizUrl = `${cleanBase}/kuis/${encodeURIComponent(input.quizId)}`;
+  const message =
+    (typeof input.message === 'string' && input.message.trim()) ||
+    buildDefaultQuizWaMessage({
+      title: input.title,
+      targetClass: input.targetClass,
+      questionCount: input.questionCount,
+      timeLimitMinutes: input.timeLimitMinutes,
+      quizUrl,
+    });
+
+  const savedGroups = loadGroups();
+  const results: QuizWaDispatchResultItem[] = [];
+  const groupLogResults: WaGroupSendLog['results'] = [];
+  const groupIdsSent: string[] = [];
+  const groupNamesSent: string[] = [];
+
+  for (let i = 0; i < resolved.targets.length; i++) {
+    const item = resolved.targets[i];
+    const matchedGroup =
+      item.kind === 'group' ? savedGroups.find((g) => g.id === item.target) : undefined;
+    const label =
+      item.kind === 'group'
+        ? matchedGroup?.name || item.target
+        : `Nomor WA ${item.target}`;
+
+    const delivery = await sendFonnteWhatsApp({
+      target: item.target,
+      message,
+    });
+
+    results.push({
+      target: item.target,
+      label,
+      kind: item.kind,
+      status: delivery.status,
+      detail: delivery.detail,
+    });
+
+    if (item.kind === 'group') {
+      groupIdsSent.push(item.target);
+      groupNamesSent.push(label);
+      groupLogResults.push({
+        groupId: item.target,
+        groupName: label,
+        status: delivery.status,
+        detail: delivery.detail,
+      });
+    }
+
+    if (i < resolved.targets.length - 1) {
+      await new Promise((r) => setTimeout(r, 600));
+    }
+  }
+
+  if (groupIdsSent.length > 0) {
+    const allSent = groupLogResults.every(
+      (r) => r.status === 'sent' || r.status === 'skipped_duplicate'
+    );
+    const anySent = groupLogResults.some(
+      (r) => r.status === 'sent' || r.status === 'skipped_duplicate'
+    );
+    const unconfigured = groupLogResults.every((r) => r.status === 'unconfigured');
+    const logs = loadGroupLogs();
+    logs.unshift({
+      id: `grplog_quiz_${Date.now()}_${crypto.randomBytes(2).toString('hex')}`,
+      groupIds: groupIdsSent,
+      groupNames: groupNamesSent,
+      message,
+      status: unconfigured ? 'unconfigured' : allSent ? 'sent' : anySent ? 'partial' : 'failed',
+      results: groupLogResults,
+      sentAtIso: new Date().toISOString(),
+      sentByEmail: input.sentByEmail,
+    });
+    saveGroupLogs(logs);
+  }
+
+  const sentCount = results.filter(
+    (r) => r.status === 'sent' || r.status === 'skipped_duplicate'
+  ).length;
+  const failedCount = results.length - sentCount;
+
+  return {
+    ok: true,
+    fonnteConfigured: configured,
+    messageSent: message,
+    results,
+    sentCount,
+    failedCount,
+  };
 }
 
 // ============================================================================
