@@ -19,6 +19,7 @@ import {
   WhatsAppBrandIcon,
 } from './BrandIcons';
 import { BranchMapPreview } from './BranchMapPreview';
+import { BatikPaomanFloating, GeometricMeshBackdrop } from './IndramayuMotifs';
 
 export function PackagesSection({
   packages,
@@ -31,8 +32,27 @@ export function PackagesSection({
 }) {
   const Heading = headingTag;
   return (
-    <section id="program-belajar" className="py-14 sm:py-20">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <section id="program-belajar" className="relative overflow-hidden py-14 sm:py-20">
+      <GeometricMeshBackdrop
+        tone="light"
+        className="inset-x-0 bottom-0 h-44 sm:h-56 opacity-[0.22]"
+      />
+      <BatikPaomanFloating
+        tone="indigo"
+        tiltDeg={-15}
+        animation="slow"
+        className="absolute top-4 -right-6 sm:top-6 sm:-right-8 lg:right-4"
+        imgClassName="w-20 sm:w-24 lg:w-32 opacity-[0.13] sm:opacity-[0.16]"
+      />
+      <BatikPaomanFloating
+        tone="indigo"
+        tiltDeg={18}
+        flipX
+        animation="reverse"
+        className="hidden lg:block absolute bottom-6 -left-10 xl:left-2"
+        imgClassName="w-24 xl:w-28 opacity-[0.14]"
+      />
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10 pb-6 border-b border-[#E5E2D9]">
           <div className="max-w-2xl space-y-2">
             <p className="text-xs font-semibold tracking-[0.14em] text-[#A61B38] uppercase">
@@ -190,8 +210,23 @@ export function PackagesSection({
 
 export function PhilosophySection({ about }: { about: SiteContentSection }) {
   return (
-    <section className="py-14 sm:py-20">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <section className="relative overflow-hidden py-14 sm:py-20">
+      <BatikPaomanFloating
+        tone="indigo"
+        tiltDeg={14}
+        animation="reverse"
+        className="hidden md:block absolute top-10 -left-8 lg:left-2"
+        imgClassName="w-24 lg:w-32 opacity-[0.15]"
+      />
+      <BatikPaomanFloating
+        tone="indigo"
+        tiltDeg={-22}
+        flipX
+        animation="slow"
+        className="hidden sm:block absolute -bottom-10 right-2 lg:right-12"
+        imgClassName="w-24 lg:w-32 opacity-[0.15]"
+      />
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-start">
           <div className="lg:col-span-5 space-y-6">
             <div className="space-y-2">
@@ -268,8 +303,23 @@ export function FounderSection({ founder }: { founder: SiteContentSection }) {
   const role = founder.founderRole || BRAND_IDENTITY.founderRole;
 
   return (
-    <section className="py-14 sm:py-20">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <section className="relative overflow-hidden py-14 sm:py-20">
+      <BatikPaomanFloating
+        tone="indigo"
+        tiltDeg={-18}
+        animation="slow"
+        className="hidden sm:block absolute top-4 right-2 lg:right-10"
+        imgClassName="w-24 lg:w-32 opacity-[0.17]"
+      />
+      <BatikPaomanFloating
+        tone="indigo"
+        tiltDeg={24}
+        flipX
+        animation="reverse"
+        className="hidden lg:block absolute bottom-4 left-2"
+        imgClassName="w-24 opacity-[0.13]"
+      />
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="editorial-card rounded-xl p-6 sm:p-10 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
           <div className="lg:col-span-5 flex justify-center">
             <div className="aspect-[858/1280] w-full max-w-sm rounded-lg overflow-hidden border border-[#E5E2D9] bg-[#F2EFE9]">
@@ -313,8 +363,16 @@ export function TeachersSection({
   compact?: boolean;
 }) {
   return (
-    <section className="py-14 sm:py-20">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <section className="relative overflow-hidden py-14 sm:py-20">
+      <BatikPaomanFloating
+        tone="indigo"
+        tiltDeg={16}
+        flipX
+        animation="slow"
+        className="hidden sm:block absolute top-8 right-4 lg:right-12"
+        imgClassName="w-24 lg:w-32 opacity-[0.15]"
+      />
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10 pb-6 border-b border-[#E5E2D9]">
           <div className="max-w-2xl space-y-2">
             <p className="text-xs font-semibold tracking-[0.14em] text-[#A61B38] uppercase">
@@ -376,8 +434,27 @@ export function TeachersSection({
 
 export function BranchesSection({ branches }: { branches: BranchLocation[] }) {
   return (
-    <section className="py-14 sm:py-20">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <section className="relative overflow-hidden py-14 sm:py-20">
+      <GeometricMeshBackdrop
+        tone="light"
+        className="inset-x-0 bottom-0 h-44 sm:h-52 opacity-[0.2]"
+      />
+      <BatikPaomanFloating
+        tone="indigo"
+        tiltDeg={-14}
+        animation="reverse"
+        className="hidden md:block absolute top-6 right-4 lg:right-14"
+        imgClassName="w-24 lg:w-32 opacity-[0.16]"
+      />
+      <BatikPaomanFloating
+        tone="indigo"
+        tiltDeg={20}
+        flipX
+        animation="slow"
+        className="hidden lg:block absolute bottom-6 left-2"
+        imgClassName="w-24 opacity-[0.14]"
+      />
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="max-w-2xl space-y-2 mb-10 pb-6 border-b border-[#E5E2D9]">
           <p className="text-xs font-semibold tracking-[0.14em] text-[#A61B38] uppercase">
             Lokasi Belajar di Indramayu
@@ -436,8 +513,27 @@ export function ContactSection({ contact }: { contact: SiteContentSection }) {
   const fbUrl = contact.facebookUrl || 'https://www.facebook.com/share/1CSomr9gXK/';
 
   return (
-    <section className="py-14 sm:py-20">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <section className="relative overflow-hidden py-14 sm:py-20">
+      <GeometricMeshBackdrop
+        tone="light"
+        className="inset-x-0 bottom-0 h-44 sm:h-52 opacity-[0.22]"
+      />
+      <BatikPaomanFloating
+        tone="indigo"
+        tiltDeg={-19}
+        animation="slow"
+        className="hidden sm:block absolute top-4 left-2 lg:left-10"
+        imgClassName="w-24 lg:w-28 opacity-[0.15]"
+      />
+      <BatikPaomanFloating
+        tone="indigo"
+        tiltDeg={16}
+        flipX
+        animation="reverse"
+        className="hidden sm:block absolute bottom-4 right-2 lg:right-10"
+        imgClassName="w-24 lg:w-32 opacity-[0.17]"
+      />
+      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="editorial-card rounded-xl p-6 sm:p-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
           <div className="lg:col-span-7 space-y-4">
             <p className="text-xs font-semibold tracking-[0.14em] text-[#A61B38] uppercase">

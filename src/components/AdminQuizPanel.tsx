@@ -1,18 +1,22 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { User } from 'firebase/auth';
 import {
   ArrowDown,
   ArrowUp,
   CheckCircle2,
-  ClipboardCheck,
   Copy,
   Download,
   Edit3,
   Eye,
+  Image as ImageIcon,
+  Link2,
   Plus,
+  Search,
   Trash2,
   Users,
+  X,
 } from 'lucide-react';
+import { uploadImageToCloudinary } from '../lib/cloudinary';
 import type {
   QuizAttemptRecord,
   QuizDefinition,
@@ -77,21 +81,29 @@ function createEmptyQuizDraft(): Partial<QuizDefinition> {
 
 export function AdminQuizPanel({ user }: { user: User }) {
   const [quizzes, setQuizzes] = useState<AdminQuizItem[]>([]);
+  const [allAttempts, setAllAttempts] = useState<QuizAttemptRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  const [deletingQuizId, setDeletingQuizId] = useState<string | null>(null);
+  const [confirmDeleteAttemptId, setConfirmDeleteAttemptId] = useState<string | null>(null);
+  const [deletingAttemptId, setDeletingAttemptId] = useState<string | null>(null);
+
+  // Recap filter state
+  const [filterQuizId, setFilterQuizId] = useState<string>('all');
+  const [filterClass, setFilterClass] = useState<string>('all');
+  const [searchStudent, setSearchStudent] = useState<string>('');
 
   // Editor state
   const [editingDraft, setEditingDraft] = useState<Partial<QuizDefinition> | null>(null);
   const [saving, setSaving] = useState(false);
   const [editorErrors, setEditorErrors] = useState<string[]>([]);
   const [notifyTarget, setNotifyTarget] = useState('');
+  const [uploadingQuestionIdx, setUploadingQuestionIdx] = useState<number | null>(null);
+  const [questionImageError, setQuestionImageError] = useState<Record<string, string>>({});
+  const [urlInputOpen, setUrlInputOpen] = useState<Record<string, boolean>>({});
 
   // Results review state
-  const [reviewData, setReviewData] = useState<{
-    quiz: QuizDefinition;
-    attempts: QuizAttemptRecord[];
-  } | null>(null);
   const [selectedAttempt, setSelectedAttempt] = useState<QuizAttemptRecord | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -100,12 +112,21 @@ export function AdminQuizPanel({ user }: { user: User }) {
     setError(null);
     try {
       const token = await user.getIdToken();
-      const res = await fetch('/api/admin/quizzes', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || 'Gagal memuat data kuis.');
-      setQuizzes(Array.isArray(data.quizzes) ? data.quizzes : []);
+      const [quizRes, attemptsRes] = await Promise.all([
+        fetch('/api/admin/quizzes', {
+          cache: 'no-store',
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch('/api/admin/quiz-attempts', {
+          cache: 'no-store',
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ]);
+      const quizData = await quizRes.json();
+      if (!quizRes.ok) throw new Error(quizData?.error || 'Gagal memuat data kuis.');
+      const attemptsData = attemptsRes.ok ? await attemptsRes.json() : { attempts: [] };
+      setQuizzes(Array.isArray(quizData.quizzes) ? quizData.quizzes : []);
+      setAllAttempts(Array.isArray(attemptsData.attempts) ? attemptsData.attempts : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal memuat data kuis.');
     } finally {
@@ -116,6 +137,41 @@ export function AdminQuizPanel({ user }: { user: User }) {
   useEffect(() => {
     loadQuizzes();
   }, [loadQuizzes]);
+
+  const availableClasses = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const att of allAttempts) {
+      const clean = att.studentClass.trim();
+      if (clean && !map.has(clean.toLowerCase())) {
+        map.set(clean.toLowerCase(), clean);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, 'id'));
+  }, [allAttempts]);
+
+  const filteredAttempts = useMemo(() => {
+    const q = searchStudent.trim().toLowerCase();
+    return allAttempts.filter((att) => {
+      if (filterQuizId !== 'all' && att.quizId !== filterQuizId) return false;
+      if (
+        filterClass !== 'all' &&
+        att.studentClass.trim().toLowerCase() !== filterClass.trim().toLowerCase()
+      ) {
+        return false;
+      }
+      if (q) {
+        const hay = `${att.studentName} ${att.studentClass} ${att.quizTitle}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [allAttempts, filterClass, filterQuizId, searchStudent]);
+
+  const averagePercentage = useMemo(() => {
+    if (filteredAttempts.length === 0) return 0;
+    const total = filteredAttempts.reduce((sum, item) => sum + (Number(item.percentage) || 0), 0);
+    return Math.round(total / filteredAttempts.length);
+  }, [filteredAttempts]);
 
   const handleSaveQuiz = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -153,7 +209,10 @@ export function AdminQuizPanel({ user }: { user: User }) {
   };
 
   const handleDeleteQuiz = async (quiz: AdminQuizItem) => {
+    if (deletingQuizId) return;
+    setDeletingQuizId(quiz.id);
     setBanner(null);
+    setError(null);
     try {
       const token = await user.getIdToken();
       const res = await fetch(`/api/admin/quizzes/${encodeURIComponent(quiz.id)}`, {
@@ -161,27 +220,45 @@ export function AdminQuizPanel({ user }: { user: User }) {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Gagal menghapus kuis.');
+      if (filterQuizId === quiz.id) setFilterQuizId('all');
+      if (selectedAttempt?.quizId === quiz.id) setSelectedAttempt(null);
       setBanner(`Kuis "${quiz.title}" telah dihapus.`);
-      if (reviewData?.quiz.id === quiz.id) setReviewData(null);
       await loadQuizzes();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal menghapus kuis.');
+    } finally {
+      setDeletingQuizId(null);
     }
   };
 
-  const handleOpenAttempts = async (quizId: string) => {
+  const handleDeleteAttempt = async (att: QuizAttemptRecord) => {
+    if (deletingAttemptId) return;
+    setDeletingAttemptId(att.id);
     setError(null);
     try {
       const token = await user.getIdToken();
-      const res = await fetch(`/api/admin/quizzes/${encodeURIComponent(quizId)}/attempts`, {
+      const res = await fetch(`/api/admin/quiz-attempts/${encodeURIComponent(att.id)}`, {
+        method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || 'Gagal memuat hasil peserta.');
-      setReviewData(data);
-      setSelectedAttempt(null);
+      if (!res.ok) throw new Error('Gagal menghapus data nilai siswa.');
+      if (selectedAttempt?.id === att.id) setSelectedAttempt(null);
+      setConfirmDeleteAttemptId(null);
+      setBanner(`Data nilai "${att.studentName}" (${att.studentClass}) telah dihapus.`);
+      await loadQuizzes();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal memuat hasil peserta.');
+      setError(err instanceof Error ? err.message : 'Gagal menghapus data nilai siswa.');
+    } finally {
+      setDeletingAttemptId(null);
+    }
+  };
+
+  const handleOpenAttempts = (quizId: string) => {
+    setFilterQuizId(quizId);
+    setSelectedAttempt(null);
+    const el = document.getElementById('rekap-nilai-kuis');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
 
@@ -203,6 +280,31 @@ export function AdminQuizPanel({ user }: { user: User }) {
       URL.revokeObjectURL(url);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal mengekspor CSV.');
+    }
+  };
+
+  const handleDownloadRecapCsv = async () => {
+    try {
+      const token = await user.getIdToken();
+      const params = new URLSearchParams();
+      if (filterQuizId !== 'all') params.set('quizId', filterQuizId);
+      if (filterClass !== 'all') params.set('studentClass', filterClass);
+      if (searchStudent.trim()) params.set('search', searchStudent.trim());
+      const res = await fetch(`/api/admin/quiz-attempts/export?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Gagal mengekspor rekap nilai CSV.');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'rekap-nilai-kuis-siswa.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal mengekspor rekap nilai CSV.');
     }
   };
 
@@ -267,6 +369,24 @@ export function AdminQuizPanel({ user }: { user: User }) {
     });
   };
 
+  const handleUploadQuestionImage = async (qIdx: number, questionId: string, file: File | null) => {
+    if (!file) return;
+    setQuestionImageError((prev) => ({ ...prev, [questionId]: '' }));
+    setUploadingQuestionIdx(qIdx);
+    try {
+      const uploaded = await uploadImageToCloudinary(file);
+      updateQuestion(qIdx, { imageUrl: uploaded.secureUrl });
+      setUrlInputOpen((prev) => ({ ...prev, [questionId]: false }));
+    } catch (err) {
+      setQuestionImageError((prev) => ({
+        ...prev,
+        [questionId]: err instanceof Error ? err.message : 'Gagal mengunggah gambar soal.',
+      }));
+    } finally {
+      setUploadingQuestionIdx(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="editorial-card rounded-2xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -281,8 +401,9 @@ export function AdminQuizPanel({ user }: { user: User }) {
         <button
           type="button"
           onClick={() => {
-            setReviewData(null);
             setEditorErrors([]);
+            setQuestionImageError({});
+            setUrlInputOpen({});
             setEditingDraft(createEmptyQuizDraft());
           }}
           className="inline-flex items-center justify-center gap-2 px-5 py-3 min-h-[44px] text-sm font-semibold text-white bg-[#BE123C] hover:bg-[#9F1239] rounded-xl transition-colors cursor-pointer shrink-0"
@@ -290,6 +411,27 @@ export function AdminQuizPanel({ user }: { user: User }) {
           <Plus className="w-4 h-4" />
           <span>Buat Kuis Baru</span>
         </button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="editorial-card rounded-2xl p-4 sm:p-5">
+          <p className="text-xs font-semibold text-[#626E7E] uppercase tracking-wider">Kuis Tersimpan</p>
+          <p className="font-mono text-2xl font-bold text-[#121820] tabular-nums mt-1">
+            {quizzes.length}
+          </p>
+        </div>
+        <div className="editorial-card rounded-2xl p-4 sm:p-5">
+          <p className="text-xs font-semibold text-[#626E7E] uppercase tracking-wider">Nilai Siswa Masuk</p>
+          <p className="font-mono text-2xl font-bold text-[#121820] tabular-nums mt-1">
+            {filteredAttempts.length}
+          </p>
+        </div>
+        <div className="editorial-card rounded-2xl p-4 sm:p-5">
+          <p className="text-xs font-semibold text-[#626E7E] uppercase tracking-wider">Rata-rata Nilai</p>
+          <p className="font-mono text-2xl font-bold text-[#0F766E] tabular-nums mt-1">
+            {filteredAttempts.length > 0 ? `${averagePercentage} / 100` : '—'}
+          </p>
+        </div>
       </div>
 
       {banner && (
@@ -576,6 +718,103 @@ export function AdminQuizPanel({ user }: { user: User }) {
                     />
                   </div>
 
+                  {/* GOOGLE FORMS-STYLE QUESTION IMAGE ATTACHMENT */}
+                  <div className="p-3.5 rounded-xl bg-white border border-[#DFDCD3] space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#3F4A59]">
+                        <ImageIcon className="w-3.5 h-3.5 text-[#BE123C]" />
+                        <span>Gambar Pendukung Soal (Opsional)</span>
+                      </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#121820] bg-[#EFECE4] hover:bg-[#DFDCD3] rounded-lg cursor-pointer transition-colors">
+                          <ImageIcon className="w-3.5 h-3.5" />
+                          <span>
+                            {uploadingQuestionIdx === qIdx
+                              ? 'Mengunggah...'
+                              : q.imageUrl
+                              ? 'Ganti Gambar'
+                              : 'Unggah Gambar'}
+                          </span>
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp"
+                            disabled={uploadingQuestionIdx === qIdx}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0] || null;
+                              e.target.value = '';
+                              void handleUploadQuestionImage(qIdx, q.id, file);
+                            }}
+                            className="sr-only"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setUrlInputOpen((prev) => ({
+                              ...prev,
+                              [q.id]: !prev[q.id],
+                            }))
+                          }
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#3F4A59] bg-white border border-[#DFDCD3] hover:border-[#121820] rounded-lg cursor-pointer transition-colors"
+                        >
+                          <Link2 className="w-3.5 h-3.5" />
+                          <span>{urlInputOpen[q.id] ? 'Tutup URL' : 'Tempel URL Gambar'}</span>
+                        </button>
+                        {q.imageUrl && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              updateQuestion(qIdx, { imageUrl: undefined });
+                              setQuestionImageError((prev) => ({ ...prev, [q.id]: '' }));
+                            }}
+                            aria-label={`Hapus gambar soal ${qIdx + 1}`}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-[#B91C1C] bg-rose-50 border border-rose-200 hover:bg-rose-100 rounded-lg cursor-pointer transition-colors"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                            <span>Hapus</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {urlInputOpen[q.id] && (
+                      <div className="space-y-1">
+                        <input
+                          type="url"
+                          value={q.imageUrl || ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            updateQuestion(qIdx, { imageUrl: val || undefined });
+                            setQuestionImageError((prev) => ({ ...prev, [q.id]: '' }));
+                          }}
+                          placeholder="https://contoh.com/gambar-soal.jpg"
+                          aria-label={`URL gambar soal ${qIdx + 1}`}
+                          className="w-full px-3 py-2 text-xs font-mono bg-[#F7F6F2] border border-[#DFDCD3] rounded-lg"
+                        />
+                        <p className="text-[11px] text-[#626E7E]">
+                          Format file yang didukung: JPG, PNG, WebP (maks. 5 MB) atau tempel tautan gambar https://.
+                        </p>
+                      </div>
+                    )}
+
+                    {questionImageError[q.id] && (
+                      <p role="alert" className="text-xs text-[#B91C1C] font-medium">
+                        {questionImageError[q.id]}
+                      </p>
+                    )}
+
+                    {q.imageUrl && (
+                      <div className="pt-1">
+                        <img
+                          src={q.imageUrl}
+                          alt={`Pratinjau gambar soal ${qIdx + 1}`}
+                          className="max-h-60 w-auto max-w-full rounded-lg border border-[#DFDCD3] object-contain bg-[#F7F6F2]"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                    )}
+                  </div>
+
                   <div className="space-y-2">
                     <p className="text-xs font-semibold text-[#121820]">
                       Pilihan Jawaban (Pilih tombol radio untuk Kunci Jawaban Benar)
@@ -638,123 +877,229 @@ export function AdminQuizPanel({ user }: { user: User }) {
         </form>
       )}
 
-      {/* QUIZ PARTICIPANTS & SCORES REVIEW */}
-      {reviewData && (
-        <div className="editorial-card rounded-2xl p-6 space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#DFDCD3]">
-            <div>
-              <p className="text-xs font-semibold text-[#BE123C] uppercase">Rekap Nilai &amp; Peserta</p>
-              <h3 className="font-display text-2xl font-bold text-[#121820]">
-                {reviewData.quiz.title}
-              </h3>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => handleDownloadCsv(reviewData.quiz.id)}
-                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#0F766E] hover:bg-[#115E59] rounded-xl cursor-pointer"
-              >
-                <Download className="w-4 h-4" />
-                <span>Ekspor CSV / Excel</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setReviewData(null)}
-                className="px-4 py-2 text-xs font-semibold text-[#3F4A59] bg-[#EFECE4] rounded-xl cursor-pointer"
-              >
-                Tutup
-              </button>
-            </div>
+      {/* CONSOLIDATED STUDENT GRADE RECAP FOR ASSESSMENT */}
+      <section id="rekap-nilai-kuis" className="editorial-card rounded-2xl p-6 space-y-5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-[#DFDCD3]">
+          <div>
+            <p className="text-xs font-semibold text-[#BE123C] uppercase tracking-wider">
+              Rekap Penilaian Siswa
+            </p>
+            <h3 className="font-display text-2xl font-bold text-[#121820]">
+              Daftar Nilai, Nama Siswa &amp; Kelas
+            </h3>
+            <p className="text-xs text-[#626E7E] mt-0.5">
+              Seluruh hasil pengerjaan kuis siswa tercatat otomatis di sini untuk keperluan rekap penilaian guru dan admin.
+            </p>
           </div>
+          <button
+            type="button"
+            disabled={filteredAttempts.length === 0}
+            onClick={handleDownloadRecapCsv}
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 min-h-[42px] text-xs font-semibold text-white bg-[#0F766E] hover:bg-[#115E59] rounded-xl cursor-pointer disabled:opacity-50 shrink-0"
+          >
+            <Download className="w-4 h-4" />
+            <span>Ekspor Rekap CSV / Excel</span>
+          </button>
+        </div>
 
-          {reviewData.attempts.length === 0 ? (
-            <p className="text-sm text-[#626E7E] py-4">Belum ada siswa yang mengirimkan jawaban untuk kuis ini.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs sm:text-sm border-collapse">
-                <thead>
-                  <tr className="bg-[#EFECE4] text-[#3F4A59] border-b border-[#DFDCD3]">
-                    <th className="py-2.5 px-3 font-semibold">Siswa</th>
-                    <th className="py-2.5 px-3 font-semibold">Kelas</th>
-                    <th className="py-2.5 px-3 font-semibold">Skor</th>
-                    <th className="py-2.5 px-3 font-semibold">%</th>
-                    <th className="py-2.5 px-3 font-semibold">Benar / Salah</th>
-                    <th className="py-2.5 px-3 font-semibold">Waktu Selesai</th>
-                    <th className="py-2.5 px-3 font-semibold">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#DFDCD3]">
-                  {reviewData.attempts.map((att) => (
-                    <tr key={att.id} className="hover:bg-[#F7F6F2]">
-                      <td className="py-2.5 px-3 font-semibold text-[#121820]">{att.studentName}</td>
-                      <td className="py-2.5 px-3 text-[#3F4A59]">{att.studentClass}</td>
-                      <td className="py-2.5 px-3 font-mono font-bold tabular-nums">
-                        {att.score}/{att.maxScore}
-                      </td>
-                      <td className="py-2.5 px-3 font-mono font-bold text-[#BE123C] tabular-nums">
-                        {att.percentage}%
-                      </td>
-                      <td className="py-2.5 px-3 font-mono tabular-nums">
-                        {att.correctCount} / {att.wrongCount}
-                      </td>
-                      <td className="py-2.5 px-3 text-xs text-[#626E7E]">
-                        {formatJakartaDateTime(att.submittedAtIso)}
-                      </td>
-                      <td className="py-2.5 px-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="relative">
+            <Search className="w-4 h-4 text-[#626E7E] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="search"
+              value={searchStudent}
+              onChange={(e) => setSearchStudent(e.target.value)}
+              placeholder="Cari nama siswa atau kelas..."
+              aria-label="Cari nama siswa atau kelas"
+              className="w-full pl-9 pr-3.5 py-2.5 min-h-[42px] text-xs sm:text-sm bg-white border border-[#DFDCD3] rounded-xl"
+            />
+          </div>
+          <select
+            value={filterQuizId}
+            onChange={(e) => setFilterQuizId(e.target.value)}
+            aria-label="Filter berdasarkan kuis"
+            className="w-full px-3.5 py-2.5 min-h-[42px] text-xs sm:text-sm bg-white border border-[#DFDCD3] rounded-xl"
+          >
+            <option value="all">Semua Kuis ({allAttempts.length})</option>
+            {quizzes.map((q) => (
+              <option key={q.id} value={q.id}>
+                {q.title} ({q.attemptCount})
+              </option>
+            ))}
+          </select>
+          <select
+            value={filterClass}
+            onChange={(e) => setFilterClass(e.target.value)}
+            aria-label="Filter berdasarkan kelas"
+            className="w-full px-3.5 py-2.5 min-h-[42px] text-xs sm:text-sm bg-white border border-[#DFDCD3] rounded-xl"
+          >
+            <option value="all">Semua Kelas</option>
+            {availableClasses.map((cls) => (
+              <option key={cls} value={cls}>
+                {cls}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {loading ? (
+          <p className="text-sm text-[#626E7E] py-2">Memuat rekap nilai siswa...</p>
+        ) : filteredAttempts.length === 0 ? (
+          <div className="p-6 rounded-xl bg-[#F7F6F2] border border-[#DFDCD3] text-center space-y-1.5">
+            <p className="text-sm font-semibold text-[#121820]">
+              {allAttempts.length === 0
+                ? 'Belum Ada Nilai Siswa yang Masuk'
+                : 'Tidak Ada Nilai yang Cocok dengan Filter'}
+            </p>
+            <p className="text-xs text-[#626E7E]">
+              {allAttempts.length === 0
+                ? 'Setelah kuis dibuat dan dikerjakan oleh siswa, nama siswa, kelas, serta nilai otomatis muncul pada tabel ini.'
+                : 'Ubah kata kunci pencarian atau pilih filter kuis/kelas lainnya.'}
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs sm:text-sm border-collapse">
+              <thead>
+                <tr className="bg-[#EFECE4] text-[#3F4A59] border-b border-[#DFDCD3]">
+                  <th className="py-2.5 px-3 font-semibold">Nama Siswa</th>
+                  <th className="py-2.5 px-3 font-semibold">Kelas</th>
+                  <th className="py-2.5 px-3 font-semibold">Nama Kuis</th>
+                  <th className="py-2.5 px-3 font-semibold">Nilai</th>
+                  <th className="py-2.5 px-3 font-semibold">Rincian Poin</th>
+                  <th className="py-2.5 px-3 font-semibold">Waktu Selesai</th>
+                  <th className="py-2.5 px-3 font-semibold">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#DFDCD3]">
+                {filteredAttempts.map((att) => (
+                  <tr key={att.id} className="hover:bg-[#F7F6F2]">
+                    <td className="py-3 px-3">
+                      <p className="font-semibold text-[#121820]">{att.studentName}</p>
+                      {att.parentWhatsapp && (
+                        <p className="text-[11px] font-mono text-[#626E7E] mt-0.5">
+                          WA: {att.parentWhatsapp}
+                        </p>
+                      )}
+                    </td>
+                    <td className="py-3 px-3 text-[#3F4A59] font-medium whitespace-nowrap">
+                      {att.studentClass}
+                    </td>
+                    <td className="py-3 px-3 text-[#121820] max-w-[220px]">
+                      <span className="line-clamp-2">{att.quizTitle}</span>
+                    </td>
+                    <td className="py-3 px-3 whitespace-nowrap">
+                      <span
+                        className={`inline-flex items-center px-2.5 py-1 rounded-lg font-mono font-bold tabular-nums text-xs ${
+                          att.percentage >= 75
+                            ? 'bg-emerald-50 text-[#15803D] border border-emerald-200'
+                            : att.percentage >= 50
+                            ? 'bg-amber-50 text-[#B45309] border border-amber-200'
+                            : 'bg-rose-50 text-[#B91C1C] border border-rose-200'
+                        }`}
+                      >
+                        {att.percentage} / 100
+                      </span>
+                    </td>
+                    <td className="py-3 px-3 font-mono text-xs tabular-nums text-[#3F4A59] whitespace-nowrap">
+                      {att.score}/{att.maxScore} poin · {att.correctCount}B / {att.wrongCount}S
+                    </td>
+                    <td className="py-3 px-3 text-xs text-[#626E7E] whitespace-nowrap">
+                      {formatJakartaDateTime(att.submittedAtIso)}
+                    </td>
+                    <td className="py-3 px-3 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
                         <button
                           type="button"
                           onClick={() => setSelectedAttempt(att)}
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-[#121820] hover:text-[#BE123C] cursor-pointer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-[#121820] bg-white border border-[#DFDCD3] hover:border-[#121820] rounded-lg cursor-pointer"
                         >
                           <Eye className="w-3.5 h-3.5" />
                           <span>Detail</span>
                         </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {selectedAttempt && (
-            <div className="p-5 rounded-xl bg-[#F7F6F2] border border-[#DFDCD3] space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-bold text-[#121820]">
-                  Lembar Jawaban: {selectedAttempt.studentName} ({selectedAttempt.studentClass})
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setSelectedAttempt(null)}
-                  className="text-xs font-semibold text-[#626E7E] hover:text-[#121820] cursor-pointer"
-                >
-                  Tutup Detail
-                </button>
-              </div>
-              <div className="space-y-2">
-                {selectedAttempt.gradedDetails.map((d, idx) => (
-                  <div
-                    key={d.questionId}
-                    className={`p-3 rounded-xl border text-xs space-y-1 ${
-                      d.isCorrect
-                        ? 'bg-emerald-50/70 border-emerald-200'
-                        : 'bg-rose-50/70 border-rose-200'
-                    }`}
-                  >
-                    <p className="font-semibold text-[#121820]">
-                      #{idx + 1}. {d.prompt}
-                    </p>
-                    <p>
-                      Jawaban siswa: <strong>{d.selectedOptionText}</strong> · Kunci:{' '}
-                      <strong>{d.correctOptionText}</strong> ({d.earnedPoints}/{d.maxPoints} poin)
-                    </p>
-                  </div>
+                        {confirmDeleteAttemptId === att.id ? (
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              disabled={deletingAttemptId === att.id}
+                              onClick={() => handleDeleteAttempt(att)}
+                              className="px-2 py-1 text-[11px] font-semibold text-white bg-[#B91C1C] rounded-md cursor-pointer disabled:opacity-50"
+                            >
+                              {deletingAttemptId === att.id ? '...' : 'Ya'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteAttemptId(null)}
+                              className="px-2 py-1 text-[11px] font-semibold text-[#3F4A59] bg-[#EFECE4] rounded-md cursor-pointer"
+                            >
+                              Batal
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteAttemptId(att.id)}
+                            aria-label={`Hapus nilai ${att.studentName}`}
+                            className="p-1.5 text-[#B91C1C] bg-white border border-rose-200 hover:bg-rose-50 rounded-lg cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
                 ))}
-              </div>
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {selectedAttempt && (
+          <div className="p-5 rounded-xl bg-[#F7F6F2] border border-[#DFDCD3] space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-bold text-[#121820]">
+                Lembar Jawaban: {selectedAttempt.studentName} ({selectedAttempt.studentClass}) — Nilai{' '}
+                {selectedAttempt.percentage}/100
+              </p>
+              <button
+                type="button"
+                onClick={() => setSelectedAttempt(null)}
+                className="text-xs font-semibold text-[#626E7E] hover:text-[#121820] cursor-pointer"
+              >
+                Tutup Detail
+              </button>
             </div>
-          )}
-        </div>
-      )}
+            <div className="space-y-2">
+              {selectedAttempt.gradedDetails.map((d, idx) => (
+                <div
+                  key={d.questionId}
+                  className={`p-3 rounded-xl border text-xs space-y-1 ${
+                    d.isCorrect
+                      ? 'bg-emerald-50/70 border-emerald-200'
+                      : 'bg-rose-50/70 border-rose-200'
+                  }`}
+                >
+                  <p className="font-semibold text-[#121820]">
+                    #{idx + 1}. {d.prompt}
+                  </p>
+                  {d.imageUrl && (
+                    <img
+                      src={d.imageUrl}
+                      alt={`Gambar soal ${idx + 1}`}
+                      className="max-h-36 w-auto max-w-full rounded-lg border border-[#DFDCD3] object-contain bg-white my-1.5"
+                      referrerPolicy="no-referrer"
+                    />
+                  )}
+                  <p>
+                    Jawaban siswa: <strong>{d.selectedOptionText}</strong> · Kunci:{' '}
+                    <strong>{d.correctOptionText}</strong> ({d.earnedPoints}/{d.maxPoints} poin)
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
 
       {/* QUIZZES LIST */}
       <div className="editorial-card rounded-2xl p-6 space-y-4">
@@ -762,7 +1107,9 @@ export function AdminQuizPanel({ user }: { user: User }) {
         {loading ? (
           <p className="text-sm text-[#626E7E]">Memuat daftar kuis...</p>
         ) : quizzes.length === 0 ? (
-          <p className="text-sm text-[#626E7E]">Belum ada kuis tersimpan.</p>
+          <p className="text-sm text-[#626E7E]">
+            Belum ada kuis tersimpan. Klik tombol <strong>Buat Kuis Baru</strong> untuk menambahkan kuis Anda sendiri.
+          </p>
         ) : (
           <div className="grid grid-cols-1 gap-4">
             {quizzes.map((q) => (
@@ -828,8 +1175,9 @@ export function AdminQuizPanel({ user }: { user: User }) {
                   <button
                     type="button"
                     onClick={() => {
-                      setReviewData(null);
                       setEditorErrors([]);
+                      setQuestionImageError({});
+                      setUrlInputOpen({});
                       setEditingDraft(q);
                     }}
                     className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-[#121820] hover:bg-[#BE123C] rounded-xl cursor-pointer"
@@ -839,9 +1187,10 @@ export function AdminQuizPanel({ user }: { user: User }) {
                   </button>
                   <button
                     type="button"
+                    disabled={deletingQuizId === q.id}
                     onClick={() => handleDeleteQuiz(q)}
                     aria-label={`Hapus ${q.title}`}
-                    className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-[#B91C1C] bg-white border border-rose-200 hover:bg-rose-50 rounded-xl cursor-pointer"
+                    className="inline-flex items-center gap-1 px-3 py-2 text-xs font-semibold text-[#B91C1C] bg-white border border-rose-200 hover:bg-rose-50 rounded-xl cursor-pointer disabled:opacity-50"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

@@ -3,7 +3,11 @@ import { ArrowRight } from 'lucide-react';
 import { BRAND_IDENTITY } from '../lib/domain';
 import { useSiteData } from '../context/SiteDataContext';
 import { GoogleOfficialIcon } from '../components/BrandIcons';
-import { BatikPaomanDivider } from '../components/IndramayuMotifs';
+import {
+  BatikPaomanDivider,
+  BatikPaomanFloating,
+  GeometricMeshBackdrop,
+} from '../components/IndramayuMotifs';
 import {
   BranchesSection,
   ContactSection,
@@ -28,6 +32,25 @@ export function HomePage() {
           referrerPolicy="no-referrer"
         />
         <div className="hero-scrim absolute inset-0" aria-hidden="true" />
+        <GeometricMeshBackdrop
+          tone="dark"
+          className="absolute inset-x-0 bottom-0 h-44 sm:h-56 opacity-[0.16]"
+        />
+        <BatikPaomanFloating
+          tone="light"
+          tiltDeg={-13}
+          animation="slow"
+          className="hidden sm:block absolute top-10 right-8 lg:right-20"
+          imgClassName="w-28 lg:w-36 opacity-[0.4]"
+        />
+        <BatikPaomanFloating
+          tone="light"
+          tiltDeg={19}
+          flipX
+          animation="reverse"
+          className="hidden lg:block absolute bottom-20 right-48"
+          imgClassName="w-20 lg:w-24 opacity-[0.28]"
+        />
 
         <div className="relative z-10 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-16 pb-10 sm:pt-24 sm:pb-12 lg:pt-28 lg:pb-14 flex-1 flex flex-col justify-between gap-12">
           {/* Editorial Focal Block — sits directly over photography with directional dark scrim */}

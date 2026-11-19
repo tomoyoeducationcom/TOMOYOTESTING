@@ -157,6 +157,7 @@ function toStudentSafeQuiz(quiz) {
       order: q.order,
       type: q.type,
       prompt: q.prompt,
+      ...q.imageUrl ? { imageUrl: q.imageUrl } : {},
       options: q.options.map((o) => ({ id: o.id, text: o.text })),
       points: q.points
     })),
@@ -232,6 +233,7 @@ function gradeQuizSubmission(quiz, answers, durationSeconds) {
     return {
       questionId: q.id,
       prompt: q.prompt,
+      ...q.imageUrl ? { imageUrl: q.imageUrl } : {},
       selectedOptionId: selectedId,
       selectedOptionText: selectedOpt?.text || "(Tidak dijawab)",
       correctOptionId: q.correctOptionId,
@@ -303,6 +305,13 @@ function validateQuizPayload(input) {
           errors.push(`${label}: Kunci jawaban yang benar wajib dipilih.`);
         }
       }
+      if (q.imageUrl !== void 0 && q.imageUrl !== null && String(q.imageUrl).trim() !== "") {
+        const cleanUrl = String(q.imageUrl).trim();
+        const isSafeUrl = /^https?:\/\/\S+$/i.test(cleanUrl) || cleanUrl.startsWith("/") && !cleanUrl.startsWith("//") && cleanUrl.length <= 1500;
+        if (!isSafeUrl || cleanUrl.length > 1500) {
+          errors.push(`${label}: URL gambar soal tidak valid (gunakan unggah gambar atau tautan https://).`);
+        }
+      }
       if (Number.isNaN(Number(q.points)) || Number(q.points) <= 0) {
         errors.push(`${label}: Bobot nilai soal harus lebih dari 0.`);
       }
@@ -343,6 +352,38 @@ function buildQuizAttemptsCsv(quiz, attempts) {
     a.percentage,
     a.correctCount,
     a.wrongCount,
+    a.durationSeconds,
+    a.submittedAtIso
+  ]);
+  const lines = [header, ...rows].map((row) => row.map(escapeCsvCell).join(","));
+  return "\uFEFF" + lines.join("\r\n");
+}
+function buildAllQuizAttemptsCsv(attempts) {
+  const header = [
+    "No",
+    "Nama Siswa",
+    "Kelas",
+    "Judul Kuis",
+    "Nilai (0-100)",
+    "Skor Poin",
+    "Skor Maksimal",
+    "Benar",
+    "Salah",
+    "WA Orang Tua",
+    "Durasi (Detik)",
+    "Waktu Selesai"
+  ];
+  const rows = attempts.map((a, idx) => [
+    idx + 1,
+    a.studentName,
+    a.studentClass,
+    a.quizTitle,
+    a.percentage,
+    a.score,
+    a.maxScore,
+    a.correctCount,
+    a.wrongCount,
+    a.parentWhatsapp || "-",
     a.durationSeconds,
     a.submittedAtIso
   ]);
@@ -530,152 +571,6 @@ function buildCampaignReportCsv(campaign) {
   const lines = [header, ...rows].map((row) => row.map(escapeCsvCell).join(","));
   return "\uFEFF" + lines.join("\r\n");
 }
-var INITIAL_SAMPLE_QUIZZES = [
-  {
-    id: "kuis-calistung-dasar",
-    title: "Latihan Calistung Dasar (TK \u2013 Kelas 1)",
-    description: "Evaluasi ringan pengenalan huruf, suku kata sederhana, dan penjumlahan dasar 1 sampai 20.",
-    instructions: "Bacalah setiap soal bersama pendamping atau secara mandiri dengan teliti. Pilih satu jawaban yang paling tepat sebelum menekan tombol Kirim Jawaban.",
-    targetClass: "TK \u2013 Kelas 1 SD",
-    status: "published",
-    timeLimitMinutes: 15,
-    maxAttempts: 3,
-    questions: [
-      {
-        id: "q1",
-        order: 1,
-        type: "multiple_choice",
-        prompt: "Hasil penjumlahan dari 7 + 5 adalah ...",
-        options: [
-          { id: "a", text: "11" },
-          { id: "b", text: "12" },
-          { id: "c", text: "13" },
-          { id: "d", text: "14" }
-        ],
-        points: 25,
-        correctOptionId: "b",
-        explanation: "7 ditambah 5 sama dengan 12."
-      },
-      {
-        id: "q2",
-        order: 2,
-        type: "multiple_choice",
-        prompt: "Manakah kata yang diawali dengan huruf B?",
-        options: [
-          { id: "a", text: "Apel" },
-          { id: "b", text: "Bola" },
-          { id: "c", text: "Meja" },
-          { id: "d", text: "Kursi" }
-        ],
-        points: 25,
-        correctOptionId: "b",
-        explanation: "Kata Bola diawali huruf B."
-      },
-      {
-        id: "q3",
-        order: 3,
-        type: "true_false",
-        prompt: "Angka 15 lebih besar daripada angka 12.",
-        options: [
-          { id: "true", text: "Benar" },
-          { id: "false", text: "Salah" }
-        ],
-        points: 25,
-        correctOptionId: "true",
-        explanation: "15 berada setelah 12 pada urutan bilangan."
-      },
-      {
-        id: "q4",
-        order: 4,
-        type: "multiple_choice",
-        prompt: "Jika Ibu membeli 9 jeruk lalu dimakan 3 jeruk, sisa jeruk adalah ...",
-        options: [
-          { id: "a", text: "5" },
-          { id: "b", text: "6" },
-          { id: "c", text: "7" },
-          { id: "d", text: "12" }
-        ],
-        points: 25,
-        correctOptionId: "b",
-        explanation: "9 dikurangi 3 sama dengan 6."
-      }
-    ],
-    createdAtIso: "2026-11-01T08:00:00.000Z",
-    updatedAtIso: "2026-11-01T08:00:00.000Z"
-  },
-  {
-    id: "kuis-tka-kelas6-latihan",
-    title: "Simulasi Persiapan TKA \u2014 Paket 3 (Kelas 6 SD)",
-    description: "Latihan soal Matematika, Bahasa Indonesia, dan IPAS untuk mengukur kesiapan menghadapi TKA.",
-    instructions: "Kerjakan soal secara mandiri dalam batas waktu yang tersedia. Nilai akan dihitung otomatis oleh sistem setelah seluruh jawaban dikirim.",
-    targetClass: "Kelas 6 SD",
-    status: "published",
-    timeLimitMinutes: 20,
-    maxAttempts: 2,
-    questions: [
-      {
-        id: "t1",
-        order: 1,
-        type: "multiple_choice",
-        prompt: "Hasil dari 24 \xD7 5 - 35 adalah ...",
-        options: [
-          { id: "a", text: "75" },
-          { id: "b", text: "85" },
-          { id: "c", text: "95" },
-          { id: "d", text: "105" }
-        ],
-        points: 25,
-        correctOptionId: "b",
-        explanation: "Perkalian didahulukan: 24 \xD7 5 = 120, lalu 120 - 35 = 85."
-      },
-      {
-        id: "t2",
-        order: 2,
-        type: "multiple_choice",
-        prompt: "Kalimat utama pada sebuah paragraf deduktif terletak pada ...",
-        options: [
-          { id: "a", text: "Awal paragraf" },
-          { id: "b", text: "Tengah paragraf" },
-          { id: "c", text: "Akhir paragraf" },
-          { id: "d", text: "Judul bacaan" }
-        ],
-        points: 25,
-        correctOptionId: "a",
-        explanation: "Paragraf deduktif menempatkan gagasan utama di awal paragraf."
-      },
-      {
-        id: "t3",
-        order: 3,
-        type: "true_false",
-        prompt: "Proses tumbuhan hijau membuat makanannya sendiri dengan bantuan cahaya matahari disebut fotosintesis.",
-        options: [
-          { id: "true", text: "Benar" },
-          { id: "false", text: "Salah" }
-        ],
-        points: 25,
-        correctOptionId: "true",
-        explanation: "Fotosintesis memanfaatkan cahaya matahari, air, dan karbon dioksida."
-      },
-      {
-        id: "t4",
-        order: 4,
-        type: "multiple_choice",
-        prompt: "Sebuah persegi memiliki panjang sisi 14 cm. Keliling persegi tersebut adalah ...",
-        options: [
-          { id: "a", text: "28 cm" },
-          { id: "b", text: "42 cm" },
-          { id: "c", text: "56 cm" },
-          { id: "d", text: "196 cm" }
-        ],
-        points: 25,
-        correctOptionId: "c",
-        explanation: "Keliling persegi = 4 \xD7 sisi = 4 \xD7 14 = 56 cm."
-      }
-    ],
-    createdAtIso: "2026-11-01T08:00:00.000Z",
-    updatedAtIso: "2026-11-01T08:00:00.000Z"
-  }
-];
 var INITIAL_WA_TEMPLATES = [
   {
     id: "tpl-pendaftaran",
@@ -1476,9 +1371,8 @@ var ATTEMPTS_FILE = "quiz-attempts.json";
 var SESSIONS_FILE = "quiz-sessions.json";
 function loadQuizzes() {
   const loaded = readJsonData(QUIZZES_FILE, null);
-  if (!loaded || !Array.isArray(loaded) || loaded.length === 0) {
-    writeJsonData(QUIZZES_FILE, INITIAL_SAMPLE_QUIZZES);
-    return [...INITIAL_SAMPLE_QUIZZES];
+  if (!loaded || !Array.isArray(loaded)) {
+    return [];
   }
   return loaded;
 }
@@ -1677,6 +1571,7 @@ function upsertAdminQuiz(payload) {
     order: idx + 1,
     type: q.type,
     prompt: q.prompt.trim(),
+    imageUrl: typeof q.imageUrl === "string" && q.imageUrl.trim() ? q.imageUrl.trim() : void 0,
     options: q.options.map((o, oIdx) => ({
       id: o.id || `opt_${oIdx + 1}`,
       text: o.text.trim()
@@ -1713,6 +1608,29 @@ function deleteAdminQuiz(quizId) {
   const next = quizzes.filter((q) => q.id !== quizId);
   if (next.length === quizzes.length) return false;
   saveQuizzes(next);
+  const attempts = loadAttempts();
+  const nextAttempts = attempts.filter((a) => a.quizId !== quizId);
+  if (nextAttempts.length !== attempts.length) {
+    saveAttempts(nextAttempts);
+  }
+  const sessions = loadSessions();
+  const nextSessions = sessions.filter((s) => s.quizId !== quizId);
+  if (nextSessions.length !== sessions.length) {
+    saveSessions(nextSessions);
+  }
+  return true;
+}
+function listAllAdminQuizAttempts() {
+  const attempts = loadAttempts();
+  return [...attempts].sort(
+    (a, b) => new Date(b.submittedAtIso).getTime() - new Date(a.submittedAtIso).getTime()
+  );
+}
+function deleteAdminQuizAttempt(attemptId) {
+  const attempts = loadAttempts();
+  const next = attempts.filter((a) => a.id !== attemptId);
+  if (next.length === attempts.length) return false;
+  saveAttempts(next);
   return true;
 }
 function getAdminQuizAttempts(quizId) {
@@ -1729,6 +1647,26 @@ function exportAdminQuizCsv(quizId) {
     ok: true,
     filename: `hasil-${safeSlug}.csv`,
     csv: buildQuizAttemptsCsv(quiz, attempts)
+  };
+}
+function exportAllAdminQuizAttemptsCsv(filters) {
+  let rows = listAllAdminQuizAttempts();
+  if (filters?.quizId && filters.quizId !== "all") {
+    rows = rows.filter((r) => r.quizId === filters.quizId);
+  }
+  if (filters?.studentClass && filters.studentClass !== "all") {
+    const cls = filters.studentClass.trim().toLowerCase();
+    rows = rows.filter((r) => r.studentClass.trim().toLowerCase() === cls);
+  }
+  if (filters?.search && filters.search.trim()) {
+    const q = filters.search.trim().toLowerCase();
+    rows = rows.filter(
+      (r) => r.studentName.toLowerCase().includes(q) || r.studentClass.toLowerCase().includes(q) || r.quizTitle.toLowerCase().includes(q)
+    );
+  }
+  return {
+    filename: "rekap-nilai-kuis-siswa.csv",
+    csv: buildAllQuizAttemptsCsv(rows)
   };
 }
 
@@ -2476,9 +2414,11 @@ function createApp() {
     res.json(status);
   });
   app2.get("/api/quizzes", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
     res.json({ quizzes: listPublicQuizzes() });
   });
   app2.get("/api/quizzes/:quizId", (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
     const data = getPublicQuizById(req.params.quizId);
     if (!data.quiz) {
       res.status(404).json({ error: "Kuis tidak ditemukan atau belum diterbitkan." });
@@ -2517,6 +2457,7 @@ function createApp() {
     res.json(outcome);
   });
   app2.get("/api/admin/quizzes", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
     const decoded = await verifyRequestFirebaseToken(req);
     if (!decoded || !isDecodedTokenAdmin(decoded)) {
       res.status(403).json({ error: "Khusus admin terotorisasi." });
@@ -2603,6 +2544,43 @@ function createApp() {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${exported.filename}"`);
     res.send(exported.csv);
+  });
+  app2.get("/api/admin/quiz-attempts", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: "Khusus admin terotorisasi." });
+      return;
+    }
+    res.json({ attempts: listAllAdminQuizAttempts() });
+  });
+  app2.get("/api/admin/quiz-attempts/export", async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: "Khusus admin terotorisasi." });
+      return;
+    }
+    const exported = exportAllAdminQuizAttemptsCsv({
+      quizId: typeof req.query.quizId === "string" ? req.query.quizId : void 0,
+      studentClass: typeof req.query.studentClass === "string" ? req.query.studentClass : void 0,
+      search: typeof req.query.search === "string" ? req.query.search : void 0
+    });
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${exported.filename}"`);
+    res.send(exported.csv);
+  });
+  app2.delete("/api/admin/quiz-attempts/:attemptId", async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: "Khusus admin terotorisasi." });
+      return;
+    }
+    const deleted = deleteAdminQuizAttempt(req.params.attemptId);
+    if (!deleted) {
+      res.status(404).json({ error: "Data hasil kuis tidak ditemukan." });
+      return;
+    }
+    res.json({ ok: true });
   });
   app2.get("/api/admin/wa-groups", async (req, res) => {
     const decoded = await verifyRequestFirebaseToken(req);

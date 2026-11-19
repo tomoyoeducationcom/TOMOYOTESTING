@@ -64,7 +64,7 @@ function QuizDirectoryPage() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch('/api/quizzes');
+        const res = await fetch('/api/quizzes', { cache: 'no-store' });
         if (!res.ok) throw new Error('Gagal memuat daftar kuis.');
         const data = (await res.json()) as { quizzes?: PublicQuizListItem[] };
         if (!cancelled) {
@@ -235,7 +235,9 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
       setLoading(true);
       setLoadError(null);
       try {
-        const res = await fetch(`/api/quizzes/${encodeURIComponent(quizId)}`);
+        const res = await fetch(`/api/quizzes/${encodeURIComponent(quizId)}`, {
+          cache: 'no-store',
+        });
         const data = await res.json();
         if (!res.ok) {
           throw new Error(data?.error || 'Kuis tidak ditemukan.');
@@ -593,6 +595,18 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
                     <h2 className="text-base sm:text-lg font-semibold text-[#141A23] leading-relaxed">
                       {q.prompt}
                     </h2>
+
+                    {q.imageUrl && (
+                      <div className="rounded-xl border border-[#E5E2D9] bg-[#FAF9F5] p-2 sm:p-3 flex justify-center">
+                        <img
+                          src={q.imageUrl}
+                          alt={`Gambar ilustrasi soal ${qIdx + 1}`}
+                          className="max-h-72 sm:max-h-80 w-auto max-w-full rounded-lg object-contain"
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                    )}
 
                     <div className="space-y-2.5 pt-1" role="radiogroup" aria-label={`Pilihan soal ${qIdx + 1}`}>
                       {q.options.map((opt, optIdx) => {

@@ -110,6 +110,37 @@
   border-bottom: 1px solid var(--border-hairline);
 }
 
+/* Gentle Floating Animations for Batik Paoman & Geometric Ornaments */
+@keyframes batikFloatSlow {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  50% {
+    transform: translate3d(0, -10px, 0) rotate(1.4deg);
+  }
+}
+
+@keyframes batikFloatReverse {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  50% {
+    transform: translate3d(0, 9px, 0) rotate(-1.4deg);
+  }
+}
+
+.batik-float-slow {
+  animation: batikFloatSlow 7.5s ease-in-out infinite;
+  will-change: transform;
+}
+
+.batik-float-reverse {
+  animation: batikFloatReverse 9s ease-in-out infinite;
+  will-change: transform;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

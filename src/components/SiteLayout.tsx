@@ -10,7 +10,12 @@ import {
   InstagramBrandIcon,
   WhatsAppBrandIcon,
 } from './BrandIcons';
-import { BatikPaomanDivider, IndramayuHorizonCrest } from './IndramayuMotifs';
+import {
+  BatikPaomanDivider,
+  BatikPaomanFloating,
+  GeometricMeshBackdrop,
+  IndramayuHorizonCrest,
+} from './IndramayuMotifs';
 
 const TOP_NAV_LINKS = [
   { to: '/', label: 'Beranda' },
@@ -230,11 +235,30 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
 
       <main className="flex-1">{children}</main>
 
-      <footer className="bg-[#141A23] text-slate-200 border-t border-slate-800 no-print">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
+      <footer className="relative overflow-hidden bg-[#141A23] text-slate-200 border-t border-slate-800 no-print">
+        <GeometricMeshBackdrop
+          tone="dark"
+          className="inset-x-0 bottom-0 h-44 sm:h-52 opacity-[0.11]"
+        />
+        <BatikPaomanFloating
+          tone="light"
+          tiltDeg={-16}
+          animation="slow"
+          className="hidden md:block absolute -bottom-12 left-4 lg:left-10"
+          imgClassName="w-28 lg:w-32 opacity-[0.2]"
+        />
+        <BatikPaomanFloating
+          tone="light"
+          tiltDeg={22}
+          flipX
+          animation="reverse"
+          className="hidden md:block absolute -top-8 right-6 lg:right-14"
+          imgClassName="w-24 lg:w-32 opacity-[0.2]"
+        />
+        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
           <BatikPaomanDivider tone="dark" />
         </div>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 lg:py-14">
+        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 lg:py-14">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10">
             <div className="space-y-4">
               <div className="flex items-center gap-3">

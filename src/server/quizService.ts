@@ -1,9 +1,9 @@
 import crypto from 'crypto';
 import {
-  INITIAL_SAMPLE_QUIZZES,
   type QuizAttemptRecord,
   type QuizDefinition,
   type StudentSafeQuiz,
+  buildAllQuizAttemptsCsv,
   buildQuizAttemptsCsv,
   checkQuizAvailability,
   countMatchingAttempts,
@@ -31,9 +31,8 @@ interface QuizSessionRecord {
 
 function loadQuizzes(): QuizDefinition[] {
   const loaded = readJsonData<QuizDefinition[] | null>(QUIZZES_FILE, null);
-  if (!loaded || !Array.isArray(loaded) || loaded.length === 0) {
-    writeJsonData(QUIZZES_FILE, INITIAL_SAMPLE_QUIZZES);
-    return [...INITIAL_SAMPLE_QUIZZES];
+  if (!loaded || !Array.isArray(loaded)) {
+    return [];
   }
   return loaded;
 }
@@ -325,6 +324,7 @@ export function upsertAdminQuiz(
     order: idx + 1,
     type: q.type,
     prompt: q.prompt.trim(),
+    imageUrl: typeof q.imageUrl === 'string' && q.imageUrl.trim() ? q.imageUrl.trim() : undefined,
     options: q.options.map((o, oIdx) => ({
       id: o.id || `opt_${oIdx + 1}`,
       text: o.text.trim(),
@@ -364,6 +364,33 @@ export function deleteAdminQuiz(quizId: string): boolean {
   const next = quizzes.filter((q) => q.id !== quizId);
   if (next.length === quizzes.length) return false;
   saveQuizzes(next);
+
+  // Clean up sessions and attempts tied to deleted quiz so ghost dummy records do not remain
+  const attempts = loadAttempts();
+  const nextAttempts = attempts.filter((a) => a.quizId !== quizId);
+  if (nextAttempts.length !== attempts.length) {
+    saveAttempts(nextAttempts);
+  }
+  const sessions = loadSessions();
+  const nextSessions = sessions.filter((s) => s.quizId !== quizId);
+  if (nextSessions.length !== sessions.length) {
+    saveSessions(nextSessions);
+  }
+  return true;
+}
+
+export function listAllAdminQuizAttempts(): QuizAttemptRecord[] {
+  const attempts = loadAttempts();
+  return [...attempts].sort(
+    (a, b) => new Date(b.submittedAtIso).getTime() - new Date(a.submittedAtIso).getTime()
+  );
+}
+
+export function deleteAdminQuizAttempt(attemptId: string): boolean {
+  const attempts = loadAttempts();
+  const next = attempts.filter((a) => a.id !== attemptId);
+  if (next.length === attempts.length) return false;
+  saveAttempts(next);
   return true;
 }
 
@@ -389,5 +416,33 @@ export function exportAdminQuizCsv(quizId: string): {
     ok: true,
     filename: `hasil-${safeSlug}.csv`,
     csv: buildQuizAttemptsCsv(quiz, attempts),
+  };
+}
+
+export function exportAllAdminQuizAttemptsCsv(filters?: {
+  quizId?: string;
+  studentClass?: string;
+  search?: string;
+}): { filename: string; csv: string } {
+  let rows = listAllAdminQuizAttempts();
+  if (filters?.quizId && filters.quizId !== 'all') {
+    rows = rows.filter((r) => r.quizId === filters.quizId);
+  }
+  if (filters?.studentClass && filters.studentClass !== 'all') {
+    const cls = filters.studentClass.trim().toLowerCase();
+    rows = rows.filter((r) => r.studentClass.trim().toLowerCase() === cls);
+  }
+  if (filters?.search && filters.search.trim()) {
+    const q = filters.search.trim().toLowerCase();
+    rows = rows.filter(
+      (r) =>
+        r.studentName.toLowerCase().includes(q) ||
+        r.studentClass.toLowerCase().includes(q) ||
+        r.quizTitle.toLowerCase().includes(q)
+    );
+  }
+  return {
+    filename: 'rekap-nilai-kuis-siswa.csv',
+    csv: buildAllQuizAttemptsCsv(rows),
   };
 }

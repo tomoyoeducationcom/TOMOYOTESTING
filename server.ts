@@ -36,10 +36,13 @@ import {
 } from './src/server/fonnte';
 import {
   deleteAdminQuiz,
+  deleteAdminQuizAttempt,
   exportAdminQuizCsv,
+  exportAllAdminQuizAttemptsCsv,
   getAdminQuizAttempts,
   getPublicQuizById,
   listAdminQuizzes,
+  listAllAdminQuizAttempts,
   listPublicQuizzes,
   startStudentQuizSession,
   submitStudentQuizAttempt,
@@ -507,10 +510,12 @@ export function createApp() {
   // ============================================================================
 
   app.get('/api/quizzes', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
     res.json({ quizzes: listPublicQuizzes() });
   });
 
   app.get('/api/quizzes/:quizId', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
     const data = getPublicQuizById(req.params.quizId);
     if (!data.quiz) {
       res.status(404).json({ error: 'Kuis tidak ditemukan atau belum diterbitkan.' });
@@ -566,6 +571,7 @@ export function createApp() {
   // ============================================================================
 
   app.get('/api/admin/quizzes', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
     const decoded = await verifyRequestFirebaseToken(req);
     if (!decoded || !isDecodedTokenAdmin(decoded)) {
       res.status(403).json({ error: 'Khusus admin terotorisasi.' });
@@ -665,6 +671,46 @@ export function createApp() {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
     res.send(exported.csv);
+  });
+
+  app.get('/api/admin/quiz-attempts', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    res.json({ attempts: listAllAdminQuizAttempts() });
+  });
+
+  app.get('/api/admin/quiz-attempts/export', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const exported = exportAllAdminQuizAttemptsCsv({
+      quizId: typeof req.query.quizId === 'string' ? req.query.quizId : undefined,
+      studentClass: typeof req.query.studentClass === 'string' ? req.query.studentClass : undefined,
+      search: typeof req.query.search === 'string' ? req.query.search : undefined,
+    });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
+    res.send(exported.csv);
+  });
+
+  app.delete('/api/admin/quiz-attempts/:attemptId', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const deleted = deleteAdminQuizAttempt(req.params.attemptId);
+    if (!deleted) {
+      res.status(404).json({ error: 'Data hasil kuis tidak ditemukan.' });
+      return;
+    }
+    res.json({ ok: true });
   });
 
   // ============================================================================

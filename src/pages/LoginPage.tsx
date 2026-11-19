@@ -4,6 +4,7 @@ import { Check, Copy, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { BRAND_IDENTITY } from '../lib/domain';
 import { GoogleSignInButton } from '../components/GoogleSignInButton';
+import { BatikPaomanFloating, GeometricMeshBackdrop } from '../components/IndramayuMotifs';
 
 export function LoginPage() {
   const { user, loading, authError, unauthorizedDomain } = useAuth();
@@ -32,8 +33,27 @@ export function LoginPage() {
   };
 
   return (
-    <section className="py-14 sm:py-20">
-      <div className="max-w-md mx-auto px-4 sm:px-6">
+    <section className="relative overflow-hidden py-14 sm:py-20">
+      <GeometricMeshBackdrop
+        tone="light"
+        className="inset-x-0 bottom-0 h-44 opacity-[0.22]"
+      />
+      <BatikPaomanFloating
+        tone="indigo"
+        tiltDeg={-17}
+        animation="slow"
+        className="hidden md:block absolute top-12 left-6 lg:left-20 xl:left-32"
+        imgClassName="w-28 lg:w-36 opacity-[0.18]"
+      />
+      <BatikPaomanFloating
+        tone="indigo"
+        tiltDeg={19}
+        flipX
+        animation="reverse"
+        className="hidden md:block absolute bottom-10 right-6 lg:right-20 xl:right-32"
+        imgClassName="w-28 lg:w-36 opacity-[0.18]"
+      />
+      <div className="relative z-10 max-w-md mx-auto px-4 sm:px-6">
         <div className="editorial-card rounded-2xl p-6 sm:p-8 space-y-6">
           <div className="flex flex-col items-center text-center gap-3">
             <img

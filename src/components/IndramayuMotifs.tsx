@@ -74,6 +74,86 @@ export function IndramayuHorizonCrest({ className = 'w-6 h-6' }: { className?: s
   );
 }
 
+export const BATIK_PAOMAN_TUMPAL_SRC = '/assets/aistudio/pngwing.com_a17ae016.png';
+export const GEOMETRIC_MESH_ORNAMENT_SRC = '/assets/aistudio/pngwing.com__1__3ee11b2d.png';
+
+/**
+ * Floating tilted Batik Paoman Indramayu tumpal ornament.
+ * Separates outer static tilt/position from inner GPU float keyframe animation.
+ */
+export function BatikPaomanFloating({
+  className = '',
+  imgClassName = 'w-24 sm:w-32 lg:w-36 opacity-20',
+  tone = 'indigo',
+  tiltDeg = 12,
+  flipX = false,
+  animation = 'slow',
+}: {
+  className?: string;
+  imgClassName?: string;
+  tone?: 'indigo' | 'light';
+  tiltDeg?: number;
+  flipX?: boolean;
+  animation?: 'slow' | 'reverse' | 'none';
+}) {
+  const animClass =
+    animation === 'slow'
+      ? 'batik-float-slow'
+      : animation === 'reverse'
+      ? 'batik-float-reverse'
+      : '';
+  const toneClass =
+    tone === 'light'
+      ? 'brightness-125 contrast-110 drop-shadow-[0_12px_28px_rgba(0,0,0,0.45)]'
+      : 'drop-shadow-[0_14px_26px_rgba(20,26,35,0.1)]';
+
+  return (
+    <div
+      aria-hidden="true"
+      className={`pointer-events-none select-none z-0 ${className}`}
+      style={{
+        transform: `rotate(${tiltDeg}deg)${flipX ? ' scaleX(-1)' : ''}`,
+      }}
+    >
+      <img
+        src={BATIK_PAOMAN_TUMPAL_SRC}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        className={`h-auto object-contain ${animClass} ${toneClass} ${imgClassName}`}
+      />
+    </div>
+  );
+}
+
+/**
+ * Subtle geometric horizon wireframe mesh anchored cleanly at section bottoms.
+ */
+export function GeometricMeshBackdrop({
+  className = '',
+  tone = 'light',
+}: {
+  className?: string;
+  tone?: 'light' | 'dark';
+}) {
+  return (
+    <div
+      aria-hidden="true"
+      className={`pointer-events-none select-none z-0 overflow-hidden absolute ${className}`}
+    >
+      <img
+        src={GEOMETRIC_MESH_ORNAMENT_SRC}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        className={`w-full h-full object-cover object-bottom ${
+          tone === 'dark' ? 'brightness-0 invert' : ''
+        }`}
+      />
+    </div>
+  );
+}
+
 /**
  * Full-bleed photographic editorial header for secondary routes.
  * Typography sits directly over a measured dark gradient scrim (never inside a detached white card).
@@ -102,6 +182,25 @@ export function PagePhotoHero({
         referrerPolicy="no-referrer"
       />
       <div className="subhero-scrim absolute inset-0" aria-hidden="true" />
+      <GeometricMeshBackdrop
+        tone="dark"
+        className="inset-x-0 bottom-0 h-32 sm:h-40 opacity-[0.14]"
+      />
+      <BatikPaomanFloating
+        tone="light"
+        tiltDeg={-14}
+        animation="slow"
+        className="hidden sm:block absolute -top-4 right-6 lg:right-16"
+        imgClassName="w-24 lg:w-32 opacity-[0.36]"
+      />
+      <BatikPaomanFloating
+        tone="light"
+        tiltDeg={18}
+        flipX
+        animation="reverse"
+        className="hidden md:block absolute -bottom-10 right-32 lg:right-52"
+        imgClassName="w-20 lg:w-24 opacity-[0.24]"
+      />
       <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14 sm:py-20 lg:py-24">
         <div className="max-w-3xl space-y-3.5">
           <p className="text-xs font-semibold tracking-[0.16em] uppercase text-[#FDE68A]">

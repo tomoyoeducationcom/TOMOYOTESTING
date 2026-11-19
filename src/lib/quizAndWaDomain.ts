@@ -13,6 +13,7 @@ export interface QuizQuestion {
   order: number;
   type: QuizQuestionType;
   prompt: string;
+  imageUrl?: string;
   options: QuizOption[];
   points: number;
   correctOptionId: string;
@@ -58,6 +59,7 @@ export interface StudentSafeQuiz {
 export interface GradedQuestionDetail {
   questionId: string;
   prompt: string;
+  imageUrl?: string;
   selectedOptionId: string;
   selectedOptionText: string;
   correctOptionId: string;
@@ -107,6 +109,7 @@ export function toStudentSafeQuiz(quiz: QuizDefinition): StudentSafeQuiz {
       order: q.order,
       type: q.type,
       prompt: q.prompt,
+      ...(q.imageUrl ? { imageUrl: q.imageUrl } : {}),
       options: q.options.map((o) => ({ id: o.id, text: o.text })),
       points: q.points,
     })),
@@ -216,6 +219,7 @@ export function gradeQuizSubmission(
     return {
       questionId: q.id,
       prompt: q.prompt,
+      ...(q.imageUrl ? { imageUrl: q.imageUrl } : {}),
       selectedOptionId: selectedId,
       selectedOptionText: selectedOpt?.text || '(Tidak dijawab)',
       correctOptionId: q.correctOptionId,
@@ -292,6 +296,15 @@ export function validateQuizPayload(input: Partial<QuizDefinition>): {
           errors.push(`${label}: Kunci jawaban yang benar wajib dipilih.`);
         }
       }
+      if (q.imageUrl !== undefined && q.imageUrl !== null && String(q.imageUrl).trim() !== '') {
+        const cleanUrl = String(q.imageUrl).trim();
+        const isSafeUrl =
+          /^https?:\/\/\S+$/i.test(cleanUrl) ||
+          (cleanUrl.startsWith('/') && !cleanUrl.startsWith('//') && cleanUrl.length <= 1500);
+        if (!isSafeUrl || cleanUrl.length > 1500) {
+          errors.push(`${label}: URL gambar soal tidak valid (gunakan unggah gambar atau tautan https://).`);
+        }
+      }
       if (Number.isNaN(Number(q.points)) || Number(q.points) <= 0) {
         errors.push(`${label}: Bobot nilai soal harus lebih dari 0.`);
       }
@@ -337,6 +350,39 @@ export function buildQuizAttemptsCsv(
     a.percentage,
     a.correctCount,
     a.wrongCount,
+    a.durationSeconds,
+    a.submittedAtIso,
+  ]);
+  const lines = [header, ...rows].map((row) => row.map(escapeCsvCell).join(','));
+  return '\uFEFF' + lines.join('\r\n');
+}
+
+export function buildAllQuizAttemptsCsv(attempts: QuizAttemptRecord[]): string {
+  const header = [
+    'No',
+    'Nama Siswa',
+    'Kelas',
+    'Judul Kuis',
+    'Nilai (0-100)',
+    'Skor Poin',
+    'Skor Maksimal',
+    'Benar',
+    'Salah',
+    'WA Orang Tua',
+    'Durasi (Detik)',
+    'Waktu Selesai',
+  ];
+  const rows = attempts.map((a, idx) => [
+    idx + 1,
+    a.studentName,
+    a.studentClass,
+    a.quizTitle,
+    a.percentage,
+    a.score,
+    a.maxScore,
+    a.correctCount,
+    a.wrongCount,
+    a.parentWhatsapp || '-',
     a.durationSeconds,
     a.submittedAtIso,
   ]);
@@ -703,154 +749,7 @@ export function buildCampaignReportCsv(campaign: WaCampaignRecord): string {
   return '\uFEFF' + lines.join('\r\n');
 }
 
-export const INITIAL_SAMPLE_QUIZZES: QuizDefinition[] = [
-  {
-    id: 'kuis-calistung-dasar',
-    title: 'Latihan Calistung Dasar (TK – Kelas 1)',
-    description: 'Evaluasi ringan pengenalan huruf, suku kata sederhana, dan penjumlahan dasar 1 sampai 20.',
-    instructions:
-      'Bacalah setiap soal bersama pendamping atau secara mandiri dengan teliti. Pilih satu jawaban yang paling tepat sebelum menekan tombol Kirim Jawaban.',
-    targetClass: 'TK – Kelas 1 SD',
-    status: 'published',
-    timeLimitMinutes: 15,
-    maxAttempts: 3,
-    questions: [
-      {
-        id: 'q1',
-        order: 1,
-        type: 'multiple_choice',
-        prompt: 'Hasil penjumlahan dari 7 + 5 adalah ...',
-        options: [
-          { id: 'a', text: '11' },
-          { id: 'b', text: '12' },
-          { id: 'c', text: '13' },
-          { id: 'd', text: '14' },
-        ],
-        points: 25,
-        correctOptionId: 'b',
-        explanation: '7 ditambah 5 sama dengan 12.',
-      },
-      {
-        id: 'q2',
-        order: 2,
-        type: 'multiple_choice',
-        prompt: 'Manakah kata yang diawali dengan huruf B?',
-        options: [
-          { id: 'a', text: 'Apel' },
-          { id: 'b', text: 'Bola' },
-          { id: 'c', text: 'Meja' },
-          { id: 'd', text: 'Kursi' },
-        ],
-        points: 25,
-        correctOptionId: 'b',
-        explanation: 'Kata Bola diawali huruf B.',
-      },
-      {
-        id: 'q3',
-        order: 3,
-        type: 'true_false',
-        prompt: 'Angka 15 lebih besar daripada angka 12.',
-        options: [
-          { id: 'true', text: 'Benar' },
-          { id: 'false', text: 'Salah' },
-        ],
-        points: 25,
-        correctOptionId: 'true',
-        explanation: '15 berada setelah 12 pada urutan bilangan.',
-      },
-      {
-        id: 'q4',
-        order: 4,
-        type: 'multiple_choice',
-        prompt: 'Jika Ibu membeli 9 jeruk lalu dimakan 3 jeruk, sisa jeruk adalah ...',
-        options: [
-          { id: 'a', text: '5' },
-          { id: 'b', text: '6' },
-          { id: 'c', text: '7' },
-          { id: 'd', text: '12' },
-        ],
-        points: 25,
-        correctOptionId: 'b',
-        explanation: '9 dikurangi 3 sama dengan 6.',
-      },
-    ],
-    createdAtIso: '2026-11-01T08:00:00.000Z',
-    updatedAtIso: '2026-11-01T08:00:00.000Z',
-  },
-  {
-    id: 'kuis-tka-kelas6-latihan',
-    title: 'Simulasi Persiapan TKA — Paket 3 (Kelas 6 SD)',
-    description: 'Latihan soal Matematika, Bahasa Indonesia, dan IPAS untuk mengukur kesiapan menghadapi TKA.',
-    instructions:
-      'Kerjakan soal secara mandiri dalam batas waktu yang tersedia. Nilai akan dihitung otomatis oleh sistem setelah seluruh jawaban dikirim.',
-    targetClass: 'Kelas 6 SD',
-    status: 'published',
-    timeLimitMinutes: 20,
-    maxAttempts: 2,
-    questions: [
-      {
-        id: 't1',
-        order: 1,
-        type: 'multiple_choice',
-        prompt: 'Hasil dari 24 × 5 - 35 adalah ...',
-        options: [
-          { id: 'a', text: '75' },
-          { id: 'b', text: '85' },
-          { id: 'c', text: '95' },
-          { id: 'd', text: '105' },
-        ],
-        points: 25,
-        correctOptionId: 'b',
-        explanation: 'Perkalian didahulukan: 24 × 5 = 120, lalu 120 - 35 = 85.',
-      },
-      {
-        id: 't2',
-        order: 2,
-        type: 'multiple_choice',
-        prompt: 'Kalimat utama pada sebuah paragraf deduktif terletak pada ...',
-        options: [
-          { id: 'a', text: 'Awal paragraf' },
-          { id: 'b', text: 'Tengah paragraf' },
-          { id: 'c', text: 'Akhir paragraf' },
-          { id: 'd', text: 'Judul bacaan' },
-        ],
-        points: 25,
-        correctOptionId: 'a',
-        explanation: 'Paragraf deduktif menempatkan gagasan utama di awal paragraf.',
-      },
-      {
-        id: 't3',
-        order: 3,
-        type: 'true_false',
-        prompt: 'Proses tumbuhan hijau membuat makanannya sendiri dengan bantuan cahaya matahari disebut fotosintesis.',
-        options: [
-          { id: 'true', text: 'Benar' },
-          { id: 'false', text: 'Salah' },
-        ],
-        points: 25,
-        correctOptionId: 'true',
-        explanation: 'Fotosintesis memanfaatkan cahaya matahari, air, dan karbon dioksida.',
-      },
-      {
-        id: 't4',
-        order: 4,
-        type: 'multiple_choice',
-        prompt: 'Sebuah persegi memiliki panjang sisi 14 cm. Keliling persegi tersebut adalah ...',
-        options: [
-          { id: 'a', text: '28 cm' },
-          { id: 'b', text: '42 cm' },
-          { id: 'c', text: '56 cm' },
-          { id: 'd', text: '196 cm' },
-        ],
-        points: 25,
-        correctOptionId: 'c',
-        explanation: 'Keliling persegi = 4 × sisi = 4 × 14 = 56 cm.',
-      },
-    ],
-    createdAtIso: '2026-11-01T08:00:00.000Z',
-    updatedAtIso: '2026-11-01T08:00:00.000Z',
-  },
-];
+export const INITIAL_SAMPLE_QUIZZES: QuizDefinition[] = [];
 
 export const INITIAL_WA_TEMPLATES: WaTemplateRecord[] = [
   {
