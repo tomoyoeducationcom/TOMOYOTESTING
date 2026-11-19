@@ -13,7 +13,11 @@ import {
 } from 'lucide-react';
 import { PagePhotoHero } from '../components/IndramayuMotifs';
 import heroStudentStudy from '../assets/images/hero_student_study_1795063097881.jpg';
-import { normalizeParticipantIdentity, type StudentSafeQuiz } from '../lib/quizAndWaDomain';
+import {
+  normalizeParticipantIdentity,
+  type QuizAttemptRecord,
+  type StudentSafeQuiz,
+} from '../lib/quizAndWaDomain';
 import {
   fetchPublishedQuizByIdFromFirestore,
   fetchPublishedQuizzesFromFirestore,
@@ -292,6 +296,8 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [saveWarning, setSaveWarning] = useState<string | null>(null);
+  const [pendingAttempt, setPendingAttempt] = useState<QuizAttemptRecord | null>(null);
+  const [retryingSave, setRetryingSave] = useState(false);
   const [confirmUnanswered, setConfirmUnanswered] = useState(false);
   const [result, setResult] = useState<QuizSubmissionResult | null>(null);
 
@@ -305,13 +311,43 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
       setLoading(true);
       setLoadError(null);
       try {
-        const data = await fetchPublishedQuizByIdFromFirestore(quizId);
-        if (!data.quiz) {
+        let resolved: {
+          quiz: StudentSafeQuiz | null;
+          availability: { available: boolean; state: string; reason?: string } | null;
+        } | null = null;
+        try {
+          resolved = await fetchPublishedQuizByIdFromFirestore(quizId);
+        } catch (fsErr) {
+          if (isFirestorePermissionDeniedError(fsErr)) {
+            throw fsErr;
+          }
+          resolved = null;
+        }
+
+        if (!resolved?.quiz) {
+          const restRes = await fetch(`/api/quizzes/${encodeURIComponent(quizId)}`, {
+            cache: 'no-store',
+          });
+          if (restRes.ok) {
+            const restJson = (await restRes.json()) as {
+              quiz?: StudentSafeQuiz | null;
+              availability?: { available: boolean; state: string; reason?: string } | null;
+            };
+            if (restJson.quiz) {
+              resolved = {
+                quiz: restJson.quiz,
+                availability: restJson.availability || null,
+              };
+            }
+          }
+        }
+
+        if (!resolved?.quiz) {
           throw new Error('Kuis tidak ditemukan atau belum diterbitkan.');
         }
         if (!cancelled) {
-          setQuiz(data.quiz);
-          setAvailability(data.availability);
+          setQuiz(resolved.quiz);
+          setAvailability(resolved.availability);
         }
       } catch (err) {
         if (!cancelled) {
@@ -331,6 +367,7 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
     setSubmitting(true);
     setSubmitError(null);
     setSaveWarning(null);
+    setPendingAttempt(null);
     try {
       const res = await fetch(`/api/quizzes/${encodeURIComponent(quiz.id)}/submit`, {
         method: 'POST',
@@ -348,12 +385,20 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
         throw new Error(data?.error || 'Gagal mengirim jawaban kuis.');
       }
 
-      if (data.attemptRecord) {
+      if (!data.savedToFirestore && data.attemptRecord) {
+        const recordWithId: QuizAttemptRecord = {
+          ...data.attemptRecord,
+          id: data.attemptRecord.id || data.result?.attemptId,
+        };
         try {
-          await saveStudentQuizAttemptToFirestore(data.attemptRecord);
+          await saveStudentQuizAttemptToFirestore({
+            ...recordWithId,
+            attemptId: data.result?.attemptId || recordWithId.id,
+          });
         } catch {
+          setPendingAttempt(recordWithId);
           setSaveWarning(
-            'Nilai sudah dihitung, namun arsip nilai ke rekap admin belum tersimpan otomatis. Hubungi admin bila nilai belum muncul di rekap.'
+            'Nilai Anda sudah dihitung, tetapi sinkronisasi ke rekap dashboard admin sempat terkendala jaringan. Tekan tombol "Kirim Ulang Nilai ke Admin" di bawah ini.'
           );
         }
       }
@@ -368,6 +413,25 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
       setConfirmUnanswered(false);
     }
   }, [parentWhatsapp, quiz, sessionToken, studentClass, studentName, submitting]);
+
+  const handleRetrySaveAttempt = async () => {
+    if (!pendingAttempt || retryingSave) return;
+    setRetryingSave(true);
+    try {
+      await saveStudentQuizAttemptToFirestore({
+        ...pendingAttempt,
+        attemptId: pendingAttempt.id,
+      });
+      setPendingAttempt(null);
+      setSaveWarning(null);
+    } catch {
+      setSaveWarning(
+        'Sinkronisasi nilai ke Firestore masih gagal. Pastikan koneksi internet stabil lalu coba tekan lagi.'
+      );
+    } finally {
+      setRetryingSave(false);
+    }
+  };
 
   useEffect(() => {
     if (stage !== 'running' || !deadlineIso) {
@@ -831,13 +895,29 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
             </div>
 
             {saveWarning && (
-              <div role="alert" className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900">
-                {saveWarning}
+              <div
+                role="alert"
+                className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-xs sm:text-sm text-amber-900 space-y-3"
+              >
+                <p className="font-semibold">{saveWarning}</p>
+                {pendingAttempt && (
+                  <button
+                    type="button"
+                    disabled={retryingSave}
+                    onClick={() => void handleRetrySaveAttempt()}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-[#A61B38] hover:bg-[#88132B] rounded-lg cursor-pointer disabled:opacity-60"
+                  >
+                    <RotateCcw className={`w-3.5 h-3.5 ${retryingSave ? 'animate-spin' : ''}`} />
+                    <span>{retryingSave ? 'Menyimpan...' : 'Kirim Ulang Nilai ke Admin'}</span>
+                  </button>
+                )}
               </div>
             )}
 
             <p className="text-xs text-[#626E7E] leading-relaxed">
-              Hasil pengerjaan Anda telah tercatat otomatis oleh sistem penilaian TOMOYO Education untuk ditinjau oleh guru pembimbing.
+              {saveWarning
+                ? 'Setelah tombol Kirim Ulang Nilai berhasil, hasil Anda akan tampil otomatis di rekap penilaian admin.'
+                : 'Hasil pengerjaan Anda (nama, kelas, dan nilai) telah tercatat otomatis ke rekap penilaian admin TOMOYO Education.'}
             </p>
 
             <div className="flex flex-wrap items-center gap-3 pt-2">

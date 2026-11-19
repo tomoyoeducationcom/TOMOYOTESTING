@@ -807,6 +807,118 @@ export function resolveQuizWaTargets(
   return { ok: true, targets };
 }
 
+export function resolveQuizAttemptId(input: {
+  attemptId?: unknown;
+  id?: unknown;
+}): string {
+  const candidates = [input.attemptId, input.id];
+  for (const cand of candidates) {
+    if (typeof cand === 'string') {
+      const trimmed = cand.trim();
+      if (
+        trimmed !== 'undefined' &&
+        trimmed !== 'null' &&
+        /^[a-zA-Z0-9_-]{3,128}$/.test(trimmed)
+      ) {
+        return trimmed;
+      }
+    }
+  }
+  return `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export interface SanitizedQuizAttemptPayload {
+  attemptId: string;
+  quizId: string;
+  quizTitle: string;
+  studentName: string;
+  studentClass: string;
+  parentWhatsapp?: string;
+  answers: Record<string, string>;
+  score: number;
+  maxScore: number;
+  percentage: number;
+  correctCount: number;
+  wrongCount: number;
+  unansweredCount: number;
+  durationSeconds: number;
+  startedAtIso: string;
+  submittedAtIso: string;
+  gradedDetails: Array<{
+    questionId: string;
+    prompt: string;
+    imageUrl?: string;
+    selectedOptionId: string;
+    selectedOptionText: string;
+    isCorrect: boolean;
+    earnedPoints: number;
+    maxPoints: number;
+  }>;
+}
+
+export function sanitizeQuizAttemptForFirestore(
+  input: Partial<QuizAttemptRecord> & { attemptId?: string }
+): SanitizedQuizAttemptPayload {
+  const attemptId = resolveQuizAttemptId(input);
+  const rawAnswers = input.answers && typeof input.answers === 'object' ? input.answers : {};
+  const cleanAnswers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(rawAnswers).slice(0, 100)) {
+    const cleanKey = String(k).trim().slice(0, 80);
+    if (!cleanKey) continue;
+    cleanAnswers[cleanKey] = String(v ?? '').trim().slice(0, 80);
+  }
+
+  const cleanDetails = (Array.isArray(input.gradedDetails) ? input.gradedDetails : [])
+    .slice(0, 100)
+    .map((d) => ({
+      questionId: String(d.questionId || '').slice(0, 80),
+      prompt: String(d.prompt || '').slice(0, 1000),
+      ...(typeof d.imageUrl === 'string' && d.imageUrl.trim()
+        ? { imageUrl: d.imageUrl.trim().slice(0, 1500) }
+        : {}),
+      selectedOptionId: String(d.selectedOptionId || '').slice(0, 80),
+      selectedOptionText: String(d.selectedOptionText || '(Tidak dijawab)').slice(0, 500),
+      isCorrect: Boolean(d.isCorrect),
+      earnedPoints: Math.max(0, Number(d.earnedPoints) || 0),
+      maxPoints: Math.max(0, Number(d.maxPoints) || 0),
+    }));
+
+  const nowIso = new Date().toISOString();
+  const submittedAtIso =
+    typeof input.submittedAtIso === 'string' && input.submittedAtIso.trim()
+      ? input.submittedAtIso.trim().slice(0, 50)
+      : nowIso;
+  const startedAtIso =
+    typeof input.startedAtIso === 'string' && input.startedAtIso.trim()
+      ? input.startedAtIso.trim().slice(0, 50)
+      : submittedAtIso;
+
+  const parentWhatsapp =
+    typeof input.parentWhatsapp === 'string' && input.parentWhatsapp.trim()
+      ? input.parentWhatsapp.trim().slice(0, 30)
+      : undefined;
+
+  return {
+    attemptId,
+    quizId: String(input.quizId || '').trim().slice(0, 128),
+    quizTitle: (String(input.quizTitle || '').trim() || 'Kuis Online TOMOYO').slice(0, 180),
+    studentName: (String(input.studentName || '').trim() || 'Siswa').slice(0, 120),
+    studentClass: (String(input.studentClass || '').trim() || '-').slice(0, 60),
+    ...(parentWhatsapp ? { parentWhatsapp } : {}),
+    answers: cleanAnswers,
+    score: Math.max(0, Number(input.score) || 0),
+    maxScore: Math.max(0, Number(input.maxScore) || 0),
+    percentage: Math.min(100, Math.max(0, Math.round(Number(input.percentage) || 0))),
+    correctCount: Math.max(0, Number(input.correctCount) || 0),
+    wrongCount: Math.max(0, Number(input.wrongCount) || 0),
+    unansweredCount: Math.max(0, Number(input.unansweredCount) || 0),
+    durationSeconds: Math.max(0, Number(input.durationSeconds) || 0),
+    startedAtIso,
+    submittedAtIso,
+    gradedDetails: cleanDetails,
+  };
+}
+
 export function parseContactsCsvText(csvText: string): WaRecipientInput[] {
   const lines = csvText
     .split(/\r?\n/)

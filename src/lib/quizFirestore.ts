@@ -7,6 +7,7 @@ import {
   getDocFromServer,
   getDocs,
   getDocsFromServer,
+  onSnapshot,
   query,
   serverTimestamp,
   setDoc,
@@ -25,6 +26,7 @@ import {
   type StudentSafeQuiz,
   checkQuizAvailability,
   computeQuestionAnswerHash,
+  sanitizeQuizAttemptForFirestore,
   toStudentSafeQuiz,
   validateQuizPayload,
 } from './quizAndWaDomain';
@@ -142,9 +144,69 @@ function mergeQuizWithKeys(
   };
 }
 
+function parseIsoMs(iso: string | undefined): number {
+  if (!iso) return 0;
+  const ms = new Date(iso).getTime();
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+export function mapFirestoreAttemptDoc(
+  id: string,
+  raw: Partial<Omit<QuizAttemptRecord, 'id'>> & { createdAt?: unknown }
+): QuizAttemptRecord {
+  const fallbackIso = timestampToIso(raw.createdAt, new Date().toISOString());
+  const submittedAtIso =
+    typeof raw.submittedAtIso === 'string' && raw.submittedAtIso.trim()
+      ? raw.submittedAtIso
+      : fallbackIso;
+  return {
+    id,
+    quizId: raw.quizId || '',
+    quizTitle: raw.quizTitle || 'Kuis Online',
+    studentName: raw.studentName || '-',
+    studentClass: raw.studentClass || '-',
+    ...(raw.parentWhatsapp ? { parentWhatsapp: raw.parentWhatsapp } : {}),
+    answers: raw.answers || {},
+    score: Number(raw.score) || 0,
+    maxScore: Number(raw.maxScore) || 0,
+    percentage: Number(raw.percentage) || 0,
+    correctCount: Number(raw.correctCount) || 0,
+    wrongCount: Number(raw.wrongCount) || 0,
+    unansweredCount: Number(raw.unansweredCount) || 0,
+    durationSeconds: Number(raw.durationSeconds) || 0,
+    startedAtIso: raw.startedAtIso || submittedAtIso,
+    submittedAtIso,
+    gradedDetails: Array.isArray(raw.gradedDetails) ? raw.gradedDetails : [],
+  };
+}
+
+export function subscribeAdminQuizAttempts(
+  onUpdate: (attempts: QuizAttemptRecord[]) => void,
+  onError?: (err: unknown) => void
+): () => void {
+  return onSnapshot(
+    collection(db, 'quizAttempts'),
+    (snap) => {
+      const list = snap.docs
+        .map((d) =>
+          mapFirestoreAttemptDoc(
+            d.id,
+            d.data() as Partial<Omit<QuizAttemptRecord, 'id'>> & { createdAt?: unknown }
+          )
+        )
+        .sort((a, b) => parseIsoMs(b.submittedAtIso) - parseIsoMs(a.submittedAtIso));
+      onUpdate(list);
+    },
+    (err) => {
+      if (onError) onError(err);
+    }
+  );
+}
+
 export async function adminFetchQuizzesAndAttemptsFromFirestore(): Promise<{
   quizzes: AdminQuizItem[];
   attempts: QuizAttemptRecord[];
+  attemptsError?: string;
 }> {
   let quizSnap;
   try {
@@ -164,12 +226,15 @@ export async function adminFetchQuizzesAndAttemptsFromFirestore(): Promise<{
   }
 
   let attemptsSnap: Awaited<ReturnType<typeof getDocsFromServer>> | null = null;
+  let attemptsError: string | undefined;
   try {
     attemptsSnap = await getDocsFromServer(collection(db, 'quizAttempts'));
   } catch (error) {
     if (isFirestorePermissionDeniedError(error)) {
       handleFirestoreError(error, OperationType.LIST, 'quizAttempts');
     }
+    attemptsError =
+      error instanceof Error ? error.message : 'Gagal memuat daftar nilai siswa dari Firestore.';
     attemptsSnap = null;
   }
 
@@ -179,29 +244,13 @@ export async function adminFetchQuizzesAndAttemptsFromFirestore(): Promise<{
   });
 
   const attempts: QuizAttemptRecord[] = (attemptsSnap?.docs || [])
-    .map((d) => {
-      const raw = d.data() as Omit<QuizAttemptRecord, 'id'>;
-      return {
-        id: d.id,
-        quizId: raw.quizId || '',
-        quizTitle: raw.quizTitle || 'Kuis Online',
-        studentName: raw.studentName || '-',
-        studentClass: raw.studentClass || '-',
-        ...(raw.parentWhatsapp ? { parentWhatsapp: raw.parentWhatsapp } : {}),
-        answers: raw.answers || {},
-        score: Number(raw.score) || 0,
-        maxScore: Number(raw.maxScore) || 0,
-        percentage: Number(raw.percentage) || 0,
-        correctCount: Number(raw.correctCount) || 0,
-        wrongCount: Number(raw.wrongCount) || 0,
-        unansweredCount: Number(raw.unansweredCount) || 0,
-        durationSeconds: Number(raw.durationSeconds) || 0,
-        startedAtIso: raw.startedAtIso || raw.submittedAtIso || '',
-        submittedAtIso: raw.submittedAtIso || '',
-        gradedDetails: Array.isArray(raw.gradedDetails) ? raw.gradedDetails : [],
-      };
-    })
-    .sort((a, b) => new Date(b.submittedAtIso).getTime() - new Date(a.submittedAtIso).getTime());
+    .map((d) =>
+      mapFirestoreAttemptDoc(
+        d.id,
+        d.data() as Partial<Omit<QuizAttemptRecord, 'id'>> & { createdAt?: unknown }
+      )
+    )
+    .sort((a, b) => parseIsoMs(b.submittedAtIso) - parseIsoMs(a.submittedAtIso));
 
   const quizzes: AdminQuizItem[] = quizSnap.docs
     .map((d) => {
@@ -211,9 +260,9 @@ export async function adminFetchQuizzesAndAttemptsFromFirestore(): Promise<{
         attemptCount: attempts.filter((a) => a.quizId === d.id).length,
       };
     })
-    .sort((a, b) => new Date(b.updatedAtIso).getTime() - new Date(a.updatedAtIso).getTime());
+    .sort((a, b) => parseIsoMs(b.updatedAtIso) - parseIsoMs(a.updatedAtIso));
 
-  return { quizzes, attempts };
+  return { quizzes, attempts, ...(attemptsError ? { attemptsError } : {}) };
 }
 
 export async function adminSaveQuizToFirestore(
@@ -486,7 +535,8 @@ export async function fetchPublishedQuizByIdFromFirestore(quizId: string): Promi
 }
 
 export async function saveStudentQuizAttemptToFirestore(input: {
-  attemptId: string;
+  id?: string;
+  attemptId?: string;
   quizId: string;
   quizTitle: string;
   studentName: string;
@@ -503,49 +553,36 @@ export async function saveStudentQuizAttemptToFirestore(input: {
   startedAtIso: string;
   submittedAtIso: string;
   gradedDetails: GradedQuestionDetail[];
-}): Promise<void> {
-  const cleanId =
-    /^[a-zA-Z0-9_-]{3,128}$/.test(input.attemptId)
-      ? input.attemptId
-      : `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-  const cleanDetails = input.gradedDetails.slice(0, 100).map((d) => ({
-    questionId: String(d.questionId || ''),
-    prompt: String(d.prompt || ''),
-    ...(d.imageUrl ? { imageUrl: String(d.imageUrl) } : {}),
-    selectedOptionId: String(d.selectedOptionId || ''),
-    selectedOptionText: String(d.selectedOptionText || '(Tidak dijawab)'),
-    isCorrect: Boolean(d.isCorrect),
-    earnedPoints: Math.max(0, Number(d.earnedPoints) || 0),
-    maxPoints: Math.max(0, Number(d.maxPoints) || 0),
-  }));
+}): Promise<string> {
+  const clean = sanitizeQuizAttemptForFirestore(input);
 
   const payload: Record<string, unknown> = {
-    quizId: input.quizId.trim().slice(0, 128),
-    quizTitle: input.quizTitle.trim().slice(0, 180),
-    studentName: input.studentName.trim().slice(0, 120),
-    studentClass: input.studentClass.trim().slice(0, 60),
-    answers: input.answers || {},
-    score: Math.max(0, Number(input.score) || 0),
-    maxScore: Math.max(0, Number(input.maxScore) || 0),
-    percentage: Math.min(100, Math.max(0, Number(input.percentage) || 0)),
-    correctCount: Math.max(0, Number(input.correctCount) || 0),
-    wrongCount: Math.max(0, Number(input.wrongCount) || 0),
-    unansweredCount: Math.max(0, Number(input.unansweredCount) || 0),
-    durationSeconds: Math.max(0, Number(input.durationSeconds) || 0),
-    startedAtIso: input.startedAtIso.slice(0, 50),
-    submittedAtIso: input.submittedAtIso.slice(0, 50),
-    gradedDetails: cleanDetails,
+    quizId: clean.quizId,
+    quizTitle: clean.quizTitle,
+    studentName: clean.studentName,
+    studentClass: clean.studentClass,
+    answers: clean.answers,
+    score: clean.score,
+    maxScore: clean.maxScore,
+    percentage: clean.percentage,
+    correctCount: clean.correctCount,
+    wrongCount: clean.wrongCount,
+    unansweredCount: clean.unansweredCount,
+    durationSeconds: clean.durationSeconds,
+    startedAtIso: clean.startedAtIso,
+    submittedAtIso: clean.submittedAtIso,
+    gradedDetails: clean.gradedDetails,
     createdAt: serverTimestamp(),
   };
 
-  if (input.parentWhatsapp?.trim()) {
-    payload.parentWhatsapp = input.parentWhatsapp.trim().slice(0, 30);
+  if (clean.parentWhatsapp) {
+    payload.parentWhatsapp = clean.parentWhatsapp;
   }
 
   try {
-    await setDoc(doc(db, 'quizAttempts', cleanId), payload);
+    await setDoc(doc(db, 'quizAttempts', clean.attemptId), payload);
+    return clean.attemptId;
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, `quizAttempts/${cleanId}`);
+    handleFirestoreError(error, OperationType.CREATE, `quizAttempts/${clean.attemptId}`);
   }
 }

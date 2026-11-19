@@ -600,6 +600,61 @@ function resolveQuizWaTargets(groupIds, singlePhone) {
   }
   return { ok: true, targets };
 }
+function resolveQuizAttemptId(input) {
+  const candidates = [input.attemptId, input.id];
+  for (const cand of candidates) {
+    if (typeof cand === "string") {
+      const trimmed = cand.trim();
+      if (trimmed !== "undefined" && trimmed !== "null" && /^[a-zA-Z0-9_-]{3,128}$/.test(trimmed)) {
+        return trimmed;
+      }
+    }
+  }
+  return `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+function sanitizeQuizAttemptForFirestore(input) {
+  const attemptId = resolveQuizAttemptId(input);
+  const rawAnswers = input.answers && typeof input.answers === "object" ? input.answers : {};
+  const cleanAnswers = {};
+  for (const [k, v] of Object.entries(rawAnswers).slice(0, 100)) {
+    const cleanKey = String(k).trim().slice(0, 80);
+    if (!cleanKey) continue;
+    cleanAnswers[cleanKey] = String(v ?? "").trim().slice(0, 80);
+  }
+  const cleanDetails = (Array.isArray(input.gradedDetails) ? input.gradedDetails : []).slice(0, 100).map((d) => ({
+    questionId: String(d.questionId || "").slice(0, 80),
+    prompt: String(d.prompt || "").slice(0, 1e3),
+    ...typeof d.imageUrl === "string" && d.imageUrl.trim() ? { imageUrl: d.imageUrl.trim().slice(0, 1500) } : {},
+    selectedOptionId: String(d.selectedOptionId || "").slice(0, 80),
+    selectedOptionText: String(d.selectedOptionText || "(Tidak dijawab)").slice(0, 500),
+    isCorrect: Boolean(d.isCorrect),
+    earnedPoints: Math.max(0, Number(d.earnedPoints) || 0),
+    maxPoints: Math.max(0, Number(d.maxPoints) || 0)
+  }));
+  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+  const submittedAtIso = typeof input.submittedAtIso === "string" && input.submittedAtIso.trim() ? input.submittedAtIso.trim().slice(0, 50) : nowIso;
+  const startedAtIso = typeof input.startedAtIso === "string" && input.startedAtIso.trim() ? input.startedAtIso.trim().slice(0, 50) : submittedAtIso;
+  const parentWhatsapp = typeof input.parentWhatsapp === "string" && input.parentWhatsapp.trim() ? input.parentWhatsapp.trim().slice(0, 30) : void 0;
+  return {
+    attemptId,
+    quizId: String(input.quizId || "").trim().slice(0, 128),
+    quizTitle: (String(input.quizTitle || "").trim() || "Kuis Online TOMOYO").slice(0, 180),
+    studentName: (String(input.studentName || "").trim() || "Siswa").slice(0, 120),
+    studentClass: (String(input.studentClass || "").trim() || "-").slice(0, 60),
+    ...parentWhatsapp ? { parentWhatsapp } : {},
+    answers: cleanAnswers,
+    score: Math.max(0, Number(input.score) || 0),
+    maxScore: Math.max(0, Number(input.maxScore) || 0),
+    percentage: Math.min(100, Math.max(0, Math.round(Number(input.percentage) || 0))),
+    correctCount: Math.max(0, Number(input.correctCount) || 0),
+    wrongCount: Math.max(0, Number(input.wrongCount) || 0),
+    unansweredCount: Math.max(0, Number(input.unansweredCount) || 0),
+    durationSeconds: Math.max(0, Number(input.durationSeconds) || 0),
+    startedAtIso,
+    submittedAtIso,
+    gradedDetails: cleanDetails
+  };
+}
 function deduplicateAndFilterRecipients(inputs, optOutPhones) {
   const optOutSet = new Set(
     optOutPhones.map((p) => {
@@ -1606,6 +1661,119 @@ async function listPublishedQuizzesFromFirestoreRest() {
     return [];
   }
 }
+function encodeFirestoreRestValue(val) {
+  if (val === null || val === void 0) return { nullValue: null };
+  if (typeof val === "boolean") return { booleanValue: val };
+  if (typeof val === "number") {
+    if (!Number.isFinite(val)) return { integerValue: "0" };
+    return Number.isInteger(val) ? { integerValue: String(val) } : { doubleValue: val };
+  }
+  if (typeof val === "string") return { stringValue: val };
+  if (Array.isArray(val)) {
+    return {
+      arrayValue: {
+        values: val.map((item) => encodeFirestoreRestValue(item))
+      }
+    };
+  }
+  if (typeof val === "object") {
+    const fields = {};
+    for (const [k, v] of Object.entries(val)) {
+      if (v !== void 0) {
+        fields[k] = encodeFirestoreRestValue(v);
+      }
+    }
+    return { mapValue: { fields } };
+  }
+  return { stringValue: String(val) };
+}
+function buildFirestoreAttemptCommitPayload(record) {
+  const projectId = firebase_applet_config_default.projectId;
+  const dbId = firebase_applet_config_default.firestoreDatabaseId || "(default)";
+  if (!projectId || projectId === "remixed-project-id") return null;
+  const clean = sanitizeQuizAttemptForFirestore(record);
+  const fieldsObj = {
+    quizId: clean.quizId,
+    quizTitle: clean.quizTitle,
+    studentName: clean.studentName,
+    studentClass: clean.studentClass,
+    answers: clean.answers,
+    score: clean.score,
+    maxScore: clean.maxScore,
+    percentage: clean.percentage,
+    correctCount: clean.correctCount,
+    wrongCount: clean.wrongCount,
+    unansweredCount: clean.unansweredCount,
+    durationSeconds: clean.durationSeconds,
+    startedAtIso: clean.startedAtIso,
+    submittedAtIso: clean.submittedAtIso,
+    gradedDetails: clean.gradedDetails
+  };
+  if (clean.parentWhatsapp) {
+    fieldsObj.parentWhatsapp = clean.parentWhatsapp;
+  }
+  const encodedFields = {};
+  for (const [k, v] of Object.entries(fieldsObj)) {
+    encodedFields[k] = encodeFirestoreRestValue(v);
+  }
+  const docName = `projects/${projectId}/databases/${dbId}/documents/quizAttempts/${clean.attemptId}`;
+  const commitUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+    projectId
+  )}/databases/${encodeURIComponent(dbId)}/documents:commit`;
+  return {
+    attemptId: clean.attemptId,
+    commitUrl,
+    body: {
+      writes: [
+        {
+          currentDocument: { exists: false },
+          update: {
+            name: docName,
+            fields: encodedFields
+          },
+          updateTransforms: [
+            {
+              fieldPath: "createdAt",
+              setToServerValue: "REQUEST_TIME"
+            }
+          ]
+        }
+      ]
+    }
+  };
+}
+async function saveQuizAttemptToFirestoreRest(record) {
+  const built = buildFirestoreAttemptCommitPayload(record);
+  if (!built) {
+    return { ok: false, error: "Konfigurasi project Firestore belum tersedia." };
+  }
+  try {
+    const res = await fetch(built.commitUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(built.body),
+      cache: "no-store"
+    });
+    if (res.ok) {
+      return { ok: true, attemptId: built.attemptId };
+    }
+    const errText = await res.text().catch(() => "");
+    if (res.status === 409 || /ALREADY_EXISTS|already exists/i.test(errText)) {
+      return { ok: true, attemptId: built.attemptId, alreadyExists: true };
+    }
+    return {
+      ok: false,
+      attemptId: built.attemptId,
+      error: `Firestore REST commit HTTP ${res.status}: ${errText.slice(0, 250)}`
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      attemptId: built.attemptId,
+      error: err instanceof Error ? err.message : "Gagal menghubungi Firestore REST API."
+    };
+  }
+}
 
 // src/server/quizService.ts
 var QUIZZES_FILE = "quizzes.json";
@@ -1818,10 +1986,18 @@ async function submitStudentQuizAttempt(input) {
     submittedAtIso,
     gradedDetails: graded.gradedDetails
   };
+  let savedToFirestore = false;
+  let firestoreError;
   if (source === "local") {
     const attempts = loadAttempts();
     attempts.unshift(record);
     saveAttempts(attempts);
+  } else {
+    const persisted = await saveQuizAttemptToFirestoreRest(record);
+    savedToFirestore = persisted.ok;
+    if (!persisted.ok) {
+      firestoreError = persisted.error;
+    }
   }
   markSessionSubmitted(session.sid);
   return {
@@ -1840,7 +2016,9 @@ async function submitStudentQuizAttempt(input) {
       durationSeconds: record.durationSeconds,
       submittedAtIso: record.submittedAtIso
     },
-    attemptRecord: record
+    attemptRecord: record,
+    savedToFirestore,
+    ...firestoreError ? { firestoreError } : {}
   };
 }
 function listAdminQuizzes() {

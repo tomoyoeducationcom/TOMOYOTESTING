@@ -17,6 +17,7 @@ import { normalizeWhatsappPhone } from '../lib/domain';
 import {
   fetchPublishedQuizFromFirestoreRest,
   listPublishedQuizzesFromFirestoreRest,
+  saveQuizAttemptToFirestoreRest,
 } from './quizFirestoreRest';
 import { readJsonData, writeJsonData } from './storage';
 
@@ -264,6 +265,8 @@ export async function submitStudentQuizAttempt(input: {
     submittedAtIso: string;
   };
   attemptRecord?: QuizAttemptRecord;
+  savedToFirestore?: boolean;
+  firestoreError?: string;
 }> {
   const { quiz, source } = await resolvePublicQuizWithSource(input.quizId);
   if (!quiz) {
@@ -345,10 +348,19 @@ export async function submitStudentQuizAttempt(input: {
     gradedDetails: graded.gradedDetails,
   };
 
+  let savedToFirestore = false;
+  let firestoreError: string | undefined;
+
   if (source === 'local') {
     const attempts = loadAttempts();
     attempts.unshift(record);
     saveAttempts(attempts);
+  } else {
+    const persisted = await saveQuizAttemptToFirestoreRest(record);
+    savedToFirestore = persisted.ok;
+    if (!persisted.ok) {
+      firestoreError = persisted.error;
+    }
   }
   markSessionSubmitted(session.sid);
 
@@ -369,6 +381,8 @@ export async function submitStudentQuizAttempt(input: {
       submittedAtIso: record.submittedAtIso,
     },
     attemptRecord: record,
+    savedToFirestore,
+    ...(firestoreError ? { firestoreError } : {}),
   };
 }
 

@@ -22,7 +22,9 @@ import {
   parseContactsCsvText,
   recalculateCampaignCounts,
   renderTemplateVariables,
+  resolveQuizAttemptId,
   resolveQuizWaTargets,
+  sanitizeQuizAttemptForFirestore,
   toStudentSafeQuiz,
   validateQuizPayload,
   type QuizAttemptRecord,
@@ -39,6 +41,7 @@ import {
   submitStudentQuizAttempt,
   upsertAdminQuiz,
 } from '../server/quizService';
+import { buildFirestoreAttemptCommitPayload } from '../server/quizFirestoreRest';
 import { sendQuizToWaTargets } from '../server/waCenterService';
 
 const TEST_QUIZ_FIXTURE: QuizDefinition = {
@@ -615,5 +618,65 @@ test('resolveQuizWaTargets and sendQuizToWaTargets support checked WA groups and
   assert.equal(dispatchRes.results[0].kind, 'group');
   assert.equal(dispatchRes.results[1].kind, 'phone');
   assert.equal(dispatchRes.results[1].target, '6282119770700');
+});
+
+test('resolveQuizAttemptId and buildFirestoreAttemptCommitPayload preserve studentName, studentClass, and score without undefined ID coercion', () => {
+  // Previously /api/quizzes/:quizId/submit returned attemptRecord with `id` (not `attemptId`),
+  // causing RegExp.test(undefined) -> "undefined" and overwriting/failing quizAttempts/undefined.
+  assert.equal(resolveQuizAttemptId({ id: 'att_abc123def' }), 'att_abc123def');
+  assert.equal(resolveQuizAttemptId({ attemptId: 'att_xyz789', id: 'att_abc123def' }), 'att_xyz789');
+  assert.notEqual(resolveQuizAttemptId({ attemptId: undefined, id: undefined }), 'undefined');
+  assert.notEqual(resolveQuizAttemptId({ attemptId: 'undefined' }), 'undefined');
+
+  const sampleRecord: QuizAttemptRecord = {
+    id: 'att_mobile_001',
+    quizId: 'kuis-percobaan-1',
+    quizTitle: 'Kuis Matematika Kelas 5',
+    studentName: 'Budi Santoso',
+    studentClass: 'Kelas 5 SD',
+    parentWhatsapp: '6281234567890',
+    answers: { q1: 'a', q2: 'true' },
+    score: 20,
+    maxScore: 20,
+    percentage: 100,
+    correctCount: 2,
+    wrongCount: 0,
+    unansweredCount: 0,
+    durationSeconds: 45,
+    startedAtIso: '2026-11-19T12:00:00.000Z',
+    submittedAtIso: '2026-11-19T12:00:45.000Z',
+    gradedDetails: [
+      {
+        questionId: 'q1',
+        prompt: '2 + 2 = ?',
+        selectedOptionId: 'a',
+        selectedOptionText: '4',
+        isCorrect: true,
+        earnedPoints: 10,
+        maxPoints: 10,
+      },
+    ],
+  };
+
+  const sanitized = sanitizeQuizAttemptForFirestore(sampleRecord);
+  assert.equal(sanitized.attemptId, 'att_mobile_001');
+  assert.equal(sanitized.studentName, 'Budi Santoso');
+  assert.equal(sanitized.studentClass, 'Kelas 5 SD');
+  assert.equal(sanitized.percentage, 100);
+
+  const commit = buildFirestoreAttemptCommitPayload(sampleRecord);
+  assert.ok(commit);
+  assert.equal(commit.attemptId, 'att_mobile_001');
+  assert.equal(commit.body.writes.length, 1);
+  const write = commit.body.writes[0];
+  assert.deepEqual(write.currentDocument, { exists: false });
+  assert.ok(write.update.name.endsWith('/documents/quizAttempts/att_mobile_001'));
+  assert.equal(write.update.fields.studentName.stringValue, 'Budi Santoso');
+  assert.equal(write.update.fields.studentClass.stringValue, 'Kelas 5 SD');
+  assert.equal(write.update.fields.score.integerValue, '20');
+  assert.equal(write.update.fields.percentage.integerValue, '100');
+  assert.deepEqual(write.updateTransforms, [
+    { fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' },
+  ]);
 });
 

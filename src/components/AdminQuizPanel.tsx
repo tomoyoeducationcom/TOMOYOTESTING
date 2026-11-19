@@ -42,6 +42,7 @@ import {
   adminSaveQuizToFirestore,
   adminUpdateQuizStatusInFirestore,
   isFirestorePermissionDeniedError,
+  subscribeAdminQuizAttempts,
   type AdminQuizItem,
 } from '../lib/quizFirestore';
 import { formatJakartaDateTime } from '../lib/domain';
@@ -213,10 +214,13 @@ export function AdminQuizPanel({ user }: { user: User }) {
     setLoading(true);
     setError(null);
     try {
-      const { quizzes: fsQuizzes, attempts: fsAttempts } =
+      const { quizzes: fsQuizzes, attempts: fsAttempts, attemptsError } =
         await adminFetchQuizzesAndAttemptsFromFirestore();
       setQuizzes(fsQuizzes);
       setAllAttempts(fsAttempts);
+      if (attemptsError) {
+        setError(attemptsError);
+      }
     } catch (err) {
       if (isFirestorePermissionDeniedError(err)) {
         setError(
@@ -233,7 +237,31 @@ export function AdminQuizPanel({ user }: { user: User }) {
   useEffect(() => {
     void loadQuizzes();
     void loadWaGroups();
+    const unsubscribe = subscribeAdminQuizAttempts(
+      (liveAttempts) => {
+        setAllAttempts(liveAttempts);
+      },
+      (subErr) => {
+        if (isFirestorePermissionDeniedError(subErr)) {
+          setError(
+            'Akses baca nilai siswa (quizAttempts) ditolak (permission-denied). Pastikan firestore.rules terbaru sudah di-publish.'
+          );
+        }
+      }
+    );
+    return () => {
+      unsubscribe();
+    };
   }, [loadQuizzes, loadWaGroups]);
+
+  const quizzesWithCounts = useMemo(
+    () =>
+      quizzes.map((q) => ({
+        ...q,
+        attemptCount: allAttempts.filter((a) => a.quizId === q.id).length,
+      })),
+    [quizzes, allAttempts]
+  );
 
   const availableClasses = useMemo(() => {
     const map = new Map<string, string>();
@@ -1254,15 +1282,26 @@ export function AdminQuizPanel({ user }: { user: User }) {
               Seluruh hasil pengerjaan kuis siswa tercatat otomatis di sini untuk keperluan rekap penilaian guru dan admin.
             </p>
           </div>
-          <button
-            type="button"
-            disabled={filteredAttempts.length === 0}
-            onClick={handleDownloadRecapCsv}
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 min-h-[42px] text-xs font-semibold text-white bg-[#0F766E] hover:bg-[#115E59] rounded-xl cursor-pointer disabled:opacity-50 shrink-0"
-          >
-            <Download className="w-4 h-4" />
-            <span>Ekspor Rekap CSV / Excel</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void loadQuizzes()}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 min-h-[42px] text-xs font-semibold text-[#121820] bg-[#EFECE4] hover:bg-[#DFDCD3] rounded-xl cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <span>Muat Ulang Nilai</span>
+            </button>
+            <button
+              type="button"
+              disabled={filteredAttempts.length === 0}
+              onClick={handleDownloadRecapCsv}
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 min-h-[42px] text-xs font-semibold text-white bg-[#0F766E] hover:bg-[#115E59] rounded-xl cursor-pointer disabled:opacity-50"
+            >
+              <Download className="w-4 h-4" />
+              <span>Ekspor Rekap CSV / Excel</span>
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1284,7 +1323,7 @@ export function AdminQuizPanel({ user }: { user: User }) {
             className="w-full px-3.5 py-2.5 min-h-[42px] text-xs sm:text-sm bg-white border border-[#DFDCD3] rounded-xl"
           >
             <option value="all">Semua Kuis ({allAttempts.length})</option>
-            {quizzes.map((q) => (
+            {quizzesWithCounts.map((q) => (
               <option key={q.id} value={q.id}>
                 {q.title} ({q.attemptCount})
               </option>
@@ -1481,16 +1520,16 @@ export function AdminQuizPanel({ user }: { user: User }) {
 
       {/* QUIZZES LIST */}
       <div className="editorial-card rounded-2xl p-6 space-y-4">
-        <h3 className="text-base font-bold text-[#121820]">Daftar Kuis ({quizzes.length})</h3>
+        <h3 className="text-base font-bold text-[#121820]">Daftar Kuis ({quizzesWithCounts.length})</h3>
         {loading ? (
           <p className="text-sm text-[#626E7E]">Memuat daftar kuis...</p>
-        ) : quizzes.length === 0 ? (
+        ) : quizzesWithCounts.length === 0 ? (
           <p className="text-sm text-[#626E7E]">
             Belum ada kuis tersimpan. Klik tombol <strong>Buat Kuis Baru</strong> untuk menambahkan kuis Anda sendiri.
           </p>
         ) : (
           <div className="grid grid-cols-1 gap-4">
-            {quizzes.map((q) => (
+            {quizzesWithCounts.map((q) => (
               <article
                 key={q.id}
                 className="p-4 sm:p-5 rounded-xl bg-[#F7F6F2] border border-[#DFDCD3] flex flex-col lg:flex-row lg:items-center justify-between gap-4"

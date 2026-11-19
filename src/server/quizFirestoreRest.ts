@@ -1,5 +1,10 @@
 import firebaseConfig from '../../firebase-applet-config.json';
-import type { QuizDefinition, QuizQuestion } from '../lib/quizAndWaDomain';
+import {
+  type QuizAttemptRecord,
+  type QuizDefinition,
+  type QuizQuestion,
+  sanitizeQuizAttemptForFirestore,
+} from '../lib/quizAndWaDomain';
 
 interface FirestoreRestValue {
   stringValue?: string;
@@ -157,5 +162,140 @@ export async function listPublishedQuizzesFromFirestoreRest(): Promise<QuizDefin
       .sort((a, b) => new Date(b.updatedAtIso).getTime() - new Date(a.updatedAtIso).getTime());
   } catch {
     return [];
+  }
+}
+
+export function encodeFirestoreRestValue(val: unknown): FirestoreRestValue {
+  if (val === null || val === undefined) return { nullValue: null };
+  if (typeof val === 'boolean') return { booleanValue: val };
+  if (typeof val === 'number') {
+    if (!Number.isFinite(val)) return { integerValue: '0' };
+    return Number.isInteger(val) ? { integerValue: String(val) } : { doubleValue: val };
+  }
+  if (typeof val === 'string') return { stringValue: val };
+  if (Array.isArray(val)) {
+    return {
+      arrayValue: {
+        values: val.map((item) => encodeFirestoreRestValue(item)),
+      },
+    };
+  }
+  if (typeof val === 'object') {
+    const fields: Record<string, FirestoreRestValue> = {};
+    for (const [k, v] of Object.entries(val as Record<string, unknown>)) {
+      if (v !== undefined) {
+        fields[k] = encodeFirestoreRestValue(v);
+      }
+    }
+    return { mapValue: { fields } };
+  }
+  return { stringValue: String(val) };
+}
+
+export function buildFirestoreAttemptCommitPayload(
+  record: Partial<QuizAttemptRecord> & { attemptId?: string }
+): {
+  attemptId: string;
+  commitUrl: string;
+  body: {
+    writes: Array<{
+      currentDocument: { exists: false };
+      update: { name: string; fields: Record<string, FirestoreRestValue> };
+      updateTransforms: Array<{ fieldPath: string; setToServerValue: 'REQUEST_TIME' }>;
+    }>;
+  };
+} | null {
+  const projectId = firebaseConfig.projectId;
+  const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
+  if (!projectId || projectId === 'remixed-project-id') return null;
+
+  const clean = sanitizeQuizAttemptForFirestore(record);
+  const fieldsObj: Record<string, unknown> = {
+    quizId: clean.quizId,
+    quizTitle: clean.quizTitle,
+    studentName: clean.studentName,
+    studentClass: clean.studentClass,
+    answers: clean.answers,
+    score: clean.score,
+    maxScore: clean.maxScore,
+    percentage: clean.percentage,
+    correctCount: clean.correctCount,
+    wrongCount: clean.wrongCount,
+    unansweredCount: clean.unansweredCount,
+    durationSeconds: clean.durationSeconds,
+    startedAtIso: clean.startedAtIso,
+    submittedAtIso: clean.submittedAtIso,
+    gradedDetails: clean.gradedDetails,
+  };
+  if (clean.parentWhatsapp) {
+    fieldsObj.parentWhatsapp = clean.parentWhatsapp;
+  }
+
+  const encodedFields: Record<string, FirestoreRestValue> = {};
+  for (const [k, v] of Object.entries(fieldsObj)) {
+    encodedFields[k] = encodeFirestoreRestValue(v);
+  }
+
+  const docName = `projects/${projectId}/databases/${dbId}/documents/quizAttempts/${clean.attemptId}`;
+  const commitUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+    projectId
+  )}/databases/${encodeURIComponent(dbId)}/documents:commit`;
+
+  return {
+    attemptId: clean.attemptId,
+    commitUrl,
+    body: {
+      writes: [
+        {
+          currentDocument: { exists: false },
+          update: {
+            name: docName,
+            fields: encodedFields,
+          },
+          updateTransforms: [
+            {
+              fieldPath: 'createdAt',
+              setToServerValue: 'REQUEST_TIME',
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+export async function saveQuizAttemptToFirestoreRest(
+  record: Partial<QuizAttemptRecord> & { attemptId?: string }
+): Promise<{ ok: boolean; attemptId?: string; alreadyExists?: boolean; error?: string }> {
+  const built = buildFirestoreAttemptCommitPayload(record);
+  if (!built) {
+    return { ok: false, error: 'Konfigurasi project Firestore belum tersedia.' };
+  }
+
+  try {
+    const res = await fetch(built.commitUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(built.body),
+      cache: 'no-store',
+    });
+    if (res.ok) {
+      return { ok: true, attemptId: built.attemptId };
+    }
+    const errText = await res.text().catch(() => '');
+    if (res.status === 409 || /ALREADY_EXISTS|already exists/i.test(errText)) {
+      return { ok: true, attemptId: built.attemptId, alreadyExists: true };
+    }
+    return {
+      ok: false,
+      attemptId: built.attemptId,
+      error: `Firestore REST commit HTTP ${res.status}: ${errText.slice(0, 250)}`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      attemptId: built.attemptId,
+      error: err instanceof Error ? err.message : 'Gagal menghubungi Firestore REST API.',
+    };
   }
 }
