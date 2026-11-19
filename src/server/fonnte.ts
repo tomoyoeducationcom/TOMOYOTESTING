@@ -1,9 +1,9 @@
-import fs from 'fs';
-import path from 'path';
 import {
   ADMIN_WHATSAPP_TARGET,
+  FONNTE_SENDER_NUMBER,
   buildPaymentDueNotificationMessage,
 } from '../lib/domain';
+import { readJsonData, writeJsonData } from './storage';
 
 export interface FonnteDeliveryResult {
   status: 'sent' | 'failed' | 'unconfigured' | 'skipped_duplicate';
@@ -31,71 +31,21 @@ export interface DueReminderJob {
   lastDeliveryDetail?: string;
 }
 
-const sentIdempotencyKeys = new Set<string>();
-const IDEMPOTENCY_DIR = path.resolve(process.cwd(), '.data');
-const IDEMPOTENCY_FILE = path.join(IDEMPOTENCY_DIR, 'fonnte-idempotency.json');
-const DUE_REMINDERS_FILE = path.join(IDEMPOTENCY_DIR, 'due-reminders.json');
+const IDEMPOTENCY_FILENAME = 'fonnte-idempotency.json';
+const DUE_REMINDERS_FILENAME = 'due-reminders.json';
 
-let dueJobsCache: DueReminderJob[] = [];
-
-function loadPersistedKeys() {
-  try {
-    if (fs.existsSync(IDEMPOTENCY_FILE)) {
-      const raw = fs.readFileSync(IDEMPOTENCY_FILE, 'utf-8');
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        for (const key of parsed) {
-          if (typeof key === 'string') {
-            sentIdempotencyKeys.add(key);
-          }
-        }
-      }
-    }
-  } catch {
-    // Fallback to in-memory set if filesystem is read-only (e.g. serverless)
-  }
-}
-
-function loadPersistedDueJobs() {
-  try {
-    if (fs.existsSync(DUE_REMINDERS_FILE)) {
-      const raw = fs.readFileSync(DUE_REMINDERS_FILE, 'utf-8');
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        dueJobsCache = parsed;
-      }
-    }
-  } catch {
-    dueJobsCache = [];
-  }
-}
+const sentIdempotencyKeys = new Set<string>(readJsonData<string[]>(IDEMPOTENCY_FILENAME, []));
+let dueJobsCache: DueReminderJob[] = readJsonData<DueReminderJob[]>(DUE_REMINDERS_FILENAME, []);
 
 function saveDueJobs() {
-  try {
-    if (!fs.existsSync(IDEMPOTENCY_DIR)) {
-      fs.mkdirSync(IDEMPOTENCY_DIR, { recursive: true });
-    }
-    fs.writeFileSync(DUE_REMINDERS_FILE, JSON.stringify(dueJobsCache, null, 2), 'utf-8');
-  } catch {
-    // Non-fatal in read-only environments
-  }
+  writeJsonData(DUE_REMINDERS_FILENAME, dueJobsCache);
 }
 
 function persistKey(key: string) {
   sentIdempotencyKeys.add(key);
-  try {
-    if (!fs.existsSync(IDEMPOTENCY_DIR)) {
-      fs.mkdirSync(IDEMPOTENCY_DIR, { recursive: true });
-    }
-    const items = Array.from(sentIdempotencyKeys).slice(-1000);
-    fs.writeFileSync(IDEMPOTENCY_FILE, JSON.stringify(items, null, 2), 'utf-8');
-  } catch {
-    // Non-fatal in read-only environments
-  }
+  const items = Array.from(sentIdempotencyKeys).slice(-2000);
+  writeJsonData(IDEMPOTENCY_FILENAME, items);
 }
-
-loadPersistedKeys();
-loadPersistedDueJobs();
 
 export function isFonnteConfigured(): boolean {
   const token = process.env.FONNTE_TOKEN;
@@ -199,6 +149,201 @@ export async function sendFonnteWhatsApp(params: {
     providerStatus: false,
     detail: lastError,
   };
+}
+
+export async function checkFonnteDeviceStatus(): Promise<{
+  configured: boolean;
+  connected: boolean;
+  senderNumber: string;
+  detail: string;
+  deviceStatus?: string;
+  quota?: string;
+}> {
+  const token = process.env.FONNTE_TOKEN?.trim();
+  if (!token) {
+    return {
+      configured: false,
+      connected: false,
+      senderNumber: FONNTE_SENDER_NUMBER,
+      detail: 'FONNTE_TOKEN belum dikonfigurasi pada environment backend.',
+    };
+  }
+
+  try {
+    const response = await fetch('https://api.fonnte.com/device', {
+      method: 'POST',
+      headers: {
+        Authorization: token,
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+    const text = await response.text();
+    let parsed: {
+      status?: boolean;
+      device_status?: string;
+      quota?: string;
+      reason?: string;
+      detail?: string;
+    } | null = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+
+    if (response.ok && parsed && parsed.status === true) {
+      const devStatus = parsed.device_status || 'connect';
+      const connected = /connect/i.test(devStatus) && !/disconnect/i.test(devStatus);
+      return {
+        configured: true,
+        connected,
+        senderNumber: FONNTE_SENDER_NUMBER,
+        deviceStatus: devStatus,
+        quota: parsed.quota ? String(parsed.quota) : undefined,
+        detail: connected
+          ? `Perangkat Fonnte terhubung (${devStatus}).`
+          : `Perangkat Fonnte berstatus: ${devStatus}.`,
+      };
+    }
+
+    return {
+      configured: true,
+      connected: false,
+      senderNumber: FONNTE_SENDER_NUMBER,
+      detail: parsed?.reason || parsed?.detail || `HTTP ${response.status} dari Fonnte device check.`,
+    };
+  } catch (err) {
+    return {
+      configured: true,
+      connected: false,
+      senderNumber: FONNTE_SENDER_NUMBER,
+      detail: err instanceof Error ? err.message : 'Gagal mengecek status perangkat Fonnte.',
+    };
+  }
+}
+
+export async function fetchFonnteGroupRefresh(): Promise<{
+  ok: boolean;
+  configured: boolean;
+  detail: string;
+}> {
+  const token = process.env.FONNTE_TOKEN?.trim();
+  if (!token) {
+    return {
+      ok: false,
+      configured: false,
+      detail: 'FONNTE_TOKEN belum dikonfigurasi di environment backend.',
+    };
+  }
+
+  try {
+    const response = await fetch('https://api.fonnte.com/fetch-group', {
+      method: 'POST',
+      headers: {
+        Authorization: token,
+      },
+      signal: AbortSignal.timeout(12000),
+    });
+    const text = await response.text();
+    let parsed: { status?: boolean; reason?: string; detail?: string } | null = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+    if (response.ok && parsed && parsed.status === true) {
+      return {
+        ok: true,
+        configured: true,
+        detail: parsed.detail || 'Daftar grup WhatsApp berhasil disinkronkan dari Fonnte.',
+      };
+    }
+    return {
+      ok: false,
+      configured: true,
+      detail: parsed?.reason || parsed?.detail || `Gagal fetch-group Fonnte (HTTP ${response.status}).`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      configured: true,
+      detail: err instanceof Error ? err.message : 'Koneksi ke Fonnte fetch-group gagal.',
+    };
+  }
+}
+
+export async function getFonnteWhatsappGroups(): Promise<{
+  ok: boolean;
+  configured: boolean;
+  detail: string;
+  groups: Array<{ id: string; name: string }>;
+}> {
+  const token = process.env.FONNTE_TOKEN?.trim();
+  if (!token) {
+    return {
+      ok: false,
+      configured: false,
+      detail: 'FONNTE_TOKEN belum dikonfigurasi di environment backend.',
+      groups: [],
+    };
+  }
+
+  try {
+    const response = await fetch('https://api.fonnte.com/get-whatsapp-group', {
+      method: 'POST',
+      headers: {
+        Authorization: token,
+      },
+      signal: AbortSignal.timeout(12000),
+    });
+    const text = await response.text();
+    let parsed: {
+      status?: boolean;
+      reason?: string;
+      detail?: string;
+      data?: Array<Record<string, unknown>>;
+    } | null = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+
+    if (response.ok && parsed && parsed.status === true) {
+      const rawList = Array.isArray(parsed.data) ? parsed.data : [];
+      const groups: Array<{ id: string; name: string }> = [];
+      for (const item of rawList) {
+        const id = String(item.id || item.target || item.jid || '').trim();
+        const name = String(item.name || item.subject || item.title || id).trim();
+        if (id) {
+          groups.push({ id, name: name || id });
+        }
+      }
+      return {
+        ok: true,
+        configured: true,
+        detail:
+          groups.length > 0
+            ? `Berhasil memuat ${groups.length} grup WhatsApp dari Fonnte.`
+            : 'Tidak ada grup WhatsApp yang ditemukan. Coba tekan Sinkronkan Grup terlebih dahulu.',
+        groups,
+      };
+    }
+
+    return {
+      ok: false,
+      configured: true,
+      detail: parsed?.reason || parsed?.detail || `Gagal mengambil grup (HTTP ${response.status}).`,
+      groups: [],
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      configured: true,
+      detail: err instanceof Error ? err.message : 'Gagal menghubungi Fonnte get-whatsapp-group.',
+      groups: [],
+    };
+  }
 }
 
 export function upsertDueReminder(input: {
@@ -321,7 +466,6 @@ export async function processDueRemindersNow(appUrl: string): Promise<
     const dueMs = new Date(job.dueAtIso).getTime();
     if (Number.isNaN(dueMs) || nowMs < dueMs) continue;
 
-    // Avoid retrying failed/unconfigured automatically more often than once every 15 minutes
     if (job.lastAttemptAtIso) {
       const lastAttemptMs = new Date(job.lastAttemptAtIso).getTime();
       if (!Number.isNaN(lastAttemptMs) && nowMs - lastAttemptMs < 15 * 60 * 1000) {

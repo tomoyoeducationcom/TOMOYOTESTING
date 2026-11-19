@@ -10,10 +10,12 @@ import {
   InstagramBrandIcon,
   WhatsAppBrandIcon,
 } from './BrandIcons';
+import { BatikPaomanDivider, IndramayuHorizonCrest } from './IndramayuMotifs';
 
 const TOP_NAV_LINKS = [
   { to: '/', label: 'Beranda' },
   { to: '/program', label: 'Program' },
+  { to: '/kuis', label: 'Kuis' },
   { to: '/guru', label: 'Guru' },
   { to: '/cabang', label: 'Cabang' },
   { to: '/kontak', label: 'Kontak' },
@@ -24,6 +26,7 @@ const DRAWER_NAV_LINKS = [
   { to: '/tentang', label: 'Tentang & Filosofi' },
   { to: '/founder', label: 'Profil Founder & CEO' },
   { to: '/program', label: 'Program & Paket Belajar' },
+  { to: '/kuis', label: 'Kuis Online Siswa' },
   { to: '/guru', label: 'Daftar Guru' },
   { to: '/galeri', label: 'Galeri Kegiatan' },
   { to: '/pengumuman', label: 'Pengumuman' },
@@ -55,10 +58,10 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
   }, [drawerOpen]);
 
   return (
-    <div className="min-h-screen flex flex-col text-slate-900">
-      <header className="sticky top-0 z-40 ios-glass-header no-print">
+    <div className="min-h-screen flex flex-col bg-[#F7F6F2] text-[#121820]">
+      <header className="sticky top-0 z-40 editorial-header no-print">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-[72px] flex items-center justify-between gap-4 lg:gap-8">
-          {/* Zone 1: Hamburger button + Original TOMOYO Logo directly beside it */}
+          {/* Zone 1: Hamburger button + Official TOMOYO Logo */}
           <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 shrink-0">
             <button
               type="button"
@@ -66,7 +69,7 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
               aria-label={drawerOpen ? 'Tutup menu navigasi' : 'Buka menu navigasi'}
               aria-expanded={drawerOpen}
               aria-controls="tomoyo-nav-drawer"
-              className="inline-flex items-center justify-center w-11 h-11 rounded-xl ios-glass-subtle text-slate-800 hover:bg-white/90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-700 transition-colors cursor-pointer shrink-0"
+              className="inline-flex items-center justify-center w-11 h-11 rounded-xl bg-white border border-[#DFDCD3] text-[#121820] hover:border-[#121820] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#BE123C] transition-colors cursor-pointer shrink-0"
             >
               {drawerOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
@@ -74,12 +77,12 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
             <Link
               to="/"
               aria-label="TOMOYO PRIVAT & BIMBEL EDUCATION — Beranda"
-              className="inline-flex items-center shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-700 rounded-lg overflow-hidden"
+              className="inline-flex items-center shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#BE123C] rounded-lg overflow-hidden"
             >
               <img
                 src={BRAND_IDENTITY.headerLogoPath}
                 alt="TOMOYO PRIVAT & BIMBEL EDUCATION"
-                className="h-10 sm:h-12 w-auto max-w-[190px] sm:max-w-none object-contain rounded-lg"
+                className="h-10 sm:h-11 w-auto max-w-[180px] sm:max-w-none object-contain rounded-lg"
                 referrerPolicy="no-referrer"
               />
             </Link>
@@ -88,18 +91,21 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
           {/* Zone 2: Clean single-line public text navigation links */}
           <nav
             aria-label="Navigasi utama"
-            className="hidden lg:flex items-center gap-6 text-sm font-medium text-slate-700"
+            className="hidden lg:flex items-center gap-6 text-sm font-medium text-[#3F4A59]"
           >
             {TOP_NAV_LINKS.map((item) => {
-              const active = pathname === item.to;
+              const active =
+                item.to === '/'
+                  ? pathname === '/'
+                  : pathname === item.to || pathname.startsWith(`${item.to}/`);
               return (
                 <Link
                   key={item.to}
                   to={item.to}
-                  className={`py-1 whitespace-nowrap shrink-0 border-b-2 transition-colors ${
+                  className={`py-1.5 whitespace-nowrap shrink-0 border-b-2 transition-colors ${
                     active
-                      ? 'text-rose-700 border-rose-700 font-semibold'
-                      : 'border-transparent hover:text-slate-950 hover:border-slate-300'
+                      ? 'text-[#BE123C] border-[#BE123C] font-semibold'
+                      : 'border-transparent hover:text-[#121820] hover:border-[#DFDCD3]'
                   }`}
                 >
                   {item.label}
@@ -108,12 +114,12 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
             })}
           </nav>
 
-          {/* Zone 3: 1 Primary CTA with Google logo when registering */}
+          {/* Zone 3: 1 Primary CTA */}
           <div className="flex items-center shrink-0">
             {user ? (
               <Link
                 to="/dashboard"
-                className="inline-flex items-center justify-center px-3.5 sm:px-4 py-2.5 min-h-[42px] text-xs sm:text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-xl shadow-sm transition-colors whitespace-nowrap shrink-0"
+                className="inline-flex items-center justify-center px-4 py-2.5 min-h-[44px] text-xs sm:text-sm font-semibold text-white bg-[#121820] hover:bg-[#1E293B] rounded-xl transition-colors whitespace-nowrap shrink-0"
               >
                 <span className="sm:hidden">Dashboard</span>
                 <span className="hidden sm:inline">Dashboard Orang Tua</span>
@@ -121,7 +127,7 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
             ) : (
               <Link
                 to="/daftar"
-                className="inline-flex items-center justify-center gap-2 px-3.5 sm:px-4 py-2 min-h-[42px] text-xs sm:text-sm font-semibold text-white bg-rose-700 hover:bg-rose-800 rounded-xl shadow-sm transition-colors whitespace-nowrap shrink-0"
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] text-xs sm:text-sm font-semibold text-white bg-[#BE123C] hover:bg-[#9F1239] rounded-xl transition-colors whitespace-nowrap shrink-0"
               >
                 <span className="w-5 h-5 rounded-full bg-white flex items-center justify-center shrink-0">
                   <GoogleOfficialIcon className="w-3.5 h-3.5" />
@@ -134,18 +140,23 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      {/* Working Hamburger Navigation Drawer */}
+      {/* Navigation Drawer */}
       {drawerOpen && (
-        <div className="fixed inset-0 z-50 flex no-print" role="dialog" aria-modal="true" aria-label="Menu navigasi TOMOYO">
+        <div
+          className="fixed inset-0 z-50 flex no-print"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Menu navigasi TOMOYO"
+        >
           <div
-            className="fixed inset-0 bg-slate-900/35 backdrop-blur-xs"
+            className="fixed inset-0 bg-[#121820]/50 backdrop-blur-xs"
             onClick={() => setDrawerOpen(false)}
           />
           <aside
             id="tomoyo-nav-drawer"
-            className="relative z-10 w-80 max-w-[85vw] ios-glass-strong h-full flex flex-col overflow-y-auto"
+            className="relative z-10 w-80 max-w-[85vw] bg-[#F7F6F2] border-r border-[#DFDCD3] h-full flex flex-col overflow-y-auto shadow-2xl"
           >
-            <div className="px-5 py-4 border-b border-slate-200/70 flex items-center justify-between gap-3">
+            <div className="px-5 py-4 border-b border-[#DFDCD3] bg-white flex items-center justify-between gap-3">
               <img
                 src={BRAND_IDENTITY.headerLogoPath}
                 alt="TOMOYO PRIVAT & BIMBEL EDUCATION"
@@ -156,7 +167,7 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
                 type="button"
                 onClick={() => setDrawerOpen(false)}
                 aria-label="Tutup menu"
-                className="inline-flex items-center justify-center w-10 h-10 rounded-xl text-slate-600 hover:bg-white/70 cursor-pointer"
+                className="inline-flex items-center justify-center w-10 h-10 rounded-xl text-[#3F4A59] hover:bg-[#EFECE4] cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -164,15 +175,18 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
 
             <nav aria-label="Semua halaman publik" className="p-4 flex-1 space-y-1">
               {DRAWER_NAV_LINKS.map((item) => {
-                const active = pathname === item.to;
+                const active =
+                  item.to === '/'
+                    ? pathname === '/'
+                    : pathname === item.to || pathname.startsWith(`${item.to}/`);
                 return (
                   <Link
                     key={item.to}
                     to={item.to}
                     className={`flex items-center px-3.5 py-2.5 min-h-[44px] rounded-xl text-sm font-medium transition-colors ${
                       active
-                        ? 'bg-rose-50/90 text-rose-800 font-semibold border border-rose-200/70'
-                        : 'text-slate-700 hover:bg-white/70 hover:text-slate-950'
+                        ? 'bg-white text-[#BE123C] font-semibold border border-[#DFDCD3]'
+                        : 'text-[#3F4A59] hover:bg-white hover:text-[#121820]'
                     }`}
                   >
                     {item.label}
@@ -181,11 +195,11 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
               })}
             </nav>
 
-            <div className="p-4 border-t border-slate-200/70 space-y-2.5 bg-white/40">
+            <div className="p-4 border-t border-[#DFDCD3] space-y-2.5 bg-white">
               {user ? (
                 <Link
                   to="/dashboard"
-                  className="flex items-center justify-center w-full px-4 py-3 min-h-[44px] text-sm font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors"
+                  className="flex items-center justify-center w-full px-4 py-3 min-h-[44px] text-sm font-semibold text-white bg-[#121820] hover:bg-[#1E293B] rounded-xl transition-colors"
                 >
                   Buka Dashboard Orang Tua
                 </Link>
@@ -193,7 +207,7 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
                 <>
                   <Link
                     to="/daftar"
-                    className="flex items-center justify-center gap-2.5 w-full px-4 py-3 min-h-[44px] text-sm font-semibold text-white bg-rose-700 hover:bg-rose-800 rounded-xl transition-colors"
+                    className="flex items-center justify-center gap-2.5 w-full px-4 py-3 min-h-[44px] text-sm font-semibold text-white bg-[#BE123C] hover:bg-[#9F1239] rounded-xl transition-colors"
                   >
                     <span className="w-5 h-5 rounded-full bg-white flex items-center justify-center shrink-0">
                       <GoogleOfficialIcon className="w-3.5 h-3.5" />
@@ -202,7 +216,7 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
                   </Link>
                   <Link
                     to="/masuk"
-                    className="flex items-center justify-center gap-2 w-full px-4 py-3 min-h-[44px] text-sm font-semibold text-slate-800 ios-glass hover:bg-white/90 rounded-xl transition-colors"
+                    className="flex items-center justify-center gap-2 w-full px-4 py-3 min-h-[44px] text-sm font-semibold text-[#121820] bg-[#F7F6F2] border border-[#DFDCD3] hover:border-[#121820] rounded-xl transition-colors"
                   >
                     <GoogleOfficialIcon className="w-4 h-4 shrink-0" />
                     <span>Masuk Orang Tua</span>
@@ -216,8 +230,11 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
 
       <main className="flex-1">{children}</main>
 
-      <footer className="bg-slate-900/95 backdrop-blur-xl text-slate-200 border-t border-slate-800 no-print">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
+      <footer className="bg-[#121820] text-slate-200 border-t border-slate-800 no-print">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6">
+          <BatikPaomanDivider tone="dark" />
+        </div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 lg:py-14">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10">
             <div className="space-y-4">
               <div className="flex items-center gap-3">
@@ -231,7 +248,7 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
                   <p className="font-bold text-white text-sm leading-snug">
                     {BRAND_IDENTITY.officialName}
                   </p>
-                  <p className="text-xs text-slate-400 tracking-wide">
+                  <p className="text-xs text-[#D9F99D] tracking-wide">
                     {BRAND_IDENTITY.tagline}
                   </p>
                 </div>
@@ -239,6 +256,10 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
               <p className="text-sm text-slate-300 leading-relaxed">
                 {BRAND_IDENTITY.meaning}
               </p>
+              <div className="inline-flex items-center gap-2 text-xs text-slate-400 pt-1">
+                <IndramayuHorizonCrest className="w-5 h-5 text-[#D9F99D]" />
+                <span>Kabupaten Indramayu · Jawa Barat</span>
+              </div>
             </div>
 
             <div className="space-y-3">
@@ -247,6 +268,7 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
                 <li><Link to="/tentang" className="hover:text-white transition-colors">Tentang &amp; Filosofi</Link></li>
                 <li><Link to="/founder" className="hover:text-white transition-colors">Profil Founder &amp; CEO</Link></li>
                 <li><Link to="/program" className="hover:text-white transition-colors">Program &amp; Paket Belajar</Link></li>
+                <li><Link to="/kuis" className="hover:text-white transition-colors">Kuis Online Siswa</Link></li>
                 <li><Link to="/guru" className="hover:text-white transition-colors">Daftar Guru</Link></li>
                 <li><Link to="/jadwal" className="hover:text-white transition-colors">Jadwal Belajar</Link></li>
                 <li><Link to="/galeri" className="hover:text-white transition-colors">Galeri Kegiatan</Link></li>

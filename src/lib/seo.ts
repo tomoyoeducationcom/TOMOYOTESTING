@@ -40,6 +40,14 @@ export const PUBLIC_INDEXABLE_ROUTES: RouteSeoMeta[] = [
     indexable: true,
   },
   {
+    path: '/kuis',
+    label: 'Kuis Online',
+    title: 'Kuis Online Siswa — TOMOYO PRIVAT & BIMBEL EDUCATION',
+    description:
+      'Latihan soal dan evaluasi belajar interaktif tanpa login untuk siswa TK hingga Kelas 6 SD TOMOYO Education.',
+    indexable: true,
+  },
+  {
     path: '/guru',
     label: 'Guru & Pengajar',
     title: 'Daftar Guru & Pengajar — TOMOYO PRIVAT & BIMBEL EDUCATION',
@@ -143,6 +151,10 @@ export function getSeoForPath(pathname: string): RouteSeoMeta {
     (r) => normalized === r.path || normalized.startsWith(`${r.path}/`)
   );
   if (noindexMatch) return noindexMatch;
+
+  if (normalized.startsWith('/kuis/')) {
+    return PUBLIC_INDEXABLE_ROUTES.find((r) => r.path === '/kuis') || PUBLIC_INDEXABLE_ROUTES[0];
+  }
 
   const publicMatch = PUBLIC_INDEXABLE_ROUTES.find((r) => r.path === normalized);
   if (publicMatch) return publicMatch;

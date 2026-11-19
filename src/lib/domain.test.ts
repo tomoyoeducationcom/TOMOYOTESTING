@@ -310,3 +310,21 @@ test('server auth extracts X-Firebase-Token first and falls back to Bearer heade
   assert.equal(extractFirebaseTokenFromHeaders({}), null);
   assert.equal(extractFirebaseTokenFromHeaders({ 'x-firebase-token': '   ' }), null);
 });
+
+test('formatFirebaseAuthError surfaces unauthorized hostname and translates common auth errors', async () => {
+  const { formatFirebaseAuthError } = await import('./domain');
+
+  const unauth = formatFirebaseAuthError(
+    { code: 'auth/unauthorized-domain', message: 'Firebase: Error (auth/unauthorized-domain).' },
+    'ais-dev-example.asia-northeast1.run.app'
+  );
+  assert.equal(unauth.code, 'auth/unauthorized-domain');
+  assert.equal(unauth.unauthorizedDomain, 'ais-dev-example.asia-northeast1.run.app');
+  assert.ok(unauth.message.includes('ais-dev-example.asia-northeast1.run.app'));
+  assert.ok(unauth.message.includes('Authorized Domains'));
+
+  const closed = formatFirebaseAuthError({ code: 'auth/popup-closed-by-user' });
+  assert.equal(closed.unauthorizedDomain, null);
+  assert.ok(closed.message.includes('ditutup'));
+});
+

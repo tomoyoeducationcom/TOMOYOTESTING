@@ -1,0 +1,230 @@
+[
+  {
+    "id": "kuis-calistung-dasar",
+    "title": "Latihan Calistung Dasar (TK – Kelas 1)",
+    "description": "Evaluasi ringan pengenalan huruf, suku kata sederhana, dan penjumlahan dasar 1 sampai 20.",
+    "instructions": "Bacalah setiap soal bersama pendamping atau secara mandiri dengan teliti. Pilih satu jawaban yang paling tepat sebelum menekan tombol Kirim Jawaban.",
+    "targetClass": "TK – Kelas 1 SD",
+    "status": "published",
+    "timeLimitMinutes": 15,
+    "maxAttempts": 3,
+    "questions": [
+      {
+        "id": "q1",
+        "order": 1,
+        "type": "multiple_choice",
+        "prompt": "Hasil penjumlahan dari 7 + 5 adalah ...",
+        "options": [
+          {
+            "id": "a",
+            "text": "11"
+          },
+          {
+            "id": "b",
+            "text": "12"
+          },
+          {
+            "id": "c",
+            "text": "13"
+          },
+          {
+            "id": "d",
+            "text": "14"
+          }
+        ],
+        "points": 25,
+        "correctOptionId": "b",
+        "explanation": "7 ditambah 5 sama dengan 12."
+      },
+      {
+        "id": "q2",
+        "order": 2,
+        "type": "multiple_choice",
+        "prompt": "Manakah kata yang diawali dengan huruf B?",
+        "options": [
+          {
+            "id": "a",
+            "text": "Apel"
+          },
+          {
+            "id": "b",
+            "text": "Bola"
+          },
+          {
+            "id": "c",
+            "text": "Meja"
+          },
+          {
+            "id": "d",
+            "text": "Kursi"
+          }
+        ],
+        "points": 25,
+        "correctOptionId": "b",
+        "explanation": "Kata Bola diawali huruf B."
+      },
+      {
+        "id": "q3",
+        "order": 3,
+        "type": "true_false",
+        "prompt": "Angka 15 lebih besar daripada angka 12.",
+        "options": [
+          {
+            "id": "true",
+            "text": "Benar"
+          },
+          {
+            "id": "false",
+            "text": "Salah"
+          }
+        ],
+        "points": 25,
+        "correctOptionId": "true",
+        "explanation": "15 berada setelah 12 pada urutan bilangan."
+      },
+      {
+        "id": "q4",
+        "order": 4,
+        "type": "multiple_choice",
+        "prompt": "Jika Ibu membeli 9 jeruk lalu dimakan 3 jeruk, sisa jeruk adalah ...",
+        "options": [
+          {
+            "id": "a",
+            "text": "5"
+          },
+          {
+            "id": "b",
+            "text": "6"
+          },
+          {
+            "id": "c",
+            "text": "7"
+          },
+          {
+            "id": "d",
+            "text": "12"
+          }
+        ],
+        "points": 25,
+        "correctOptionId": "b",
+        "explanation": "9 dikurangi 3 sama dengan 6."
+      }
+    ],
+    "createdAtIso": "2026-11-01T08:00:00.000Z",
+    "updatedAtIso": "2026-11-01T08:00:00.000Z"
+  },
+  {
+    "id": "kuis-tka-kelas6-latihan",
+    "title": "Simulasi Persiapan TKA — Paket 3 (Kelas 6 SD)",
+    "description": "Latihan soal Matematika, Bahasa Indonesia, dan IPAS untuk mengukur kesiapan menghadapi TKA.",
+    "instructions": "Kerjakan soal secara mandiri dalam batas waktu yang tersedia. Nilai akan dihitung otomatis oleh sistem setelah seluruh jawaban dikirim.",
+    "targetClass": "Kelas 6 SD",
+    "status": "published",
+    "timeLimitMinutes": 20,
+    "maxAttempts": 2,
+    "questions": [
+      {
+        "id": "t1",
+        "order": 1,
+        "type": "multiple_choice",
+        "prompt": "Hasil dari 24 × 5 - 35 adalah ...",
+        "options": [
+          {
+            "id": "a",
+            "text": "75"
+          },
+          {
+            "id": "b",
+            "text": "85"
+          },
+          {
+            "id": "c",
+            "text": "95"
+          },
+          {
+            "id": "d",
+            "text": "105"
+          }
+        ],
+        "points": 25,
+        "correctOptionId": "b",
+        "explanation": "Perkalian didahulukan: 24 × 5 = 120, lalu 120 - 35 = 85."
+      },
+      {
+        "id": "t2",
+        "order": 2,
+        "type": "multiple_choice",
+        "prompt": "Kalimat utama pada sebuah paragraf deduktif terletak pada ...",
+        "options": [
+          {
+            "id": "a",
+            "text": "Awal paragraf"
+          },
+          {
+            "id": "b",
+            "text": "Tengah paragraf"
+          },
+          {
+            "id": "c",
+            "text": "Akhir paragraf"
+          },
+          {
+            "id": "d",
+            "text": "Judul bacaan"
+          }
+        ],
+        "points": 25,
+        "correctOptionId": "a",
+        "explanation": "Paragraf deduktif menempatkan gagasan utama di awal paragraf."
+      },
+      {
+        "id": "t3",
+        "order": 3,
+        "type": "true_false",
+        "prompt": "Proses tumbuhan hijau membuat makanannya sendiri dengan bantuan cahaya matahari disebut fotosintesis.",
+        "options": [
+          {
+            "id": "true",
+            "text": "Benar"
+          },
+          {
+            "id": "false",
+            "text": "Salah"
+          }
+        ],
+        "points": 25,
+        "correctOptionId": "true",
+        "explanation": "Fotosintesis memanfaatkan cahaya matahari, air, dan karbon dioksida."
+      },
+      {
+        "id": "t4",
+        "order": 4,
+        "type": "multiple_choice",
+        "prompt": "Sebuah persegi memiliki panjang sisi 14 cm. Keliling persegi tersebut adalah ...",
+        "options": [
+          {
+            "id": "a",
+            "text": "28 cm"
+          },
+          {
+            "id": "b",
+            "text": "42 cm"
+          },
+          {
+            "id": "c",
+            "text": "56 cm"
+          },
+          {
+            "id": "d",
+            "text": "196 cm"
+          }
+        ],
+        "points": 25,
+        "correctOptionId": "c",
+        "explanation": "Keliling persegi = 4 × sisi = 4 × 14 = 56 cm."
+      }
+    ],
+    "createdAtIso": "2026-11-01T08:00:00.000Z",
+    "updatedAtIso": "2026-11-01T08:00:00.000Z"
+  }
+]

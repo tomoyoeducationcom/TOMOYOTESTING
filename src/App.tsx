@@ -22,6 +22,7 @@ import {
 import { LoginPage } from './pages/LoginPage';
 import { ParentDashboardPage } from './pages/ParentDashboardPage';
 import { AdminDashboardPage } from './pages/AdminDashboardPage';
+import { QuizzesPage } from './pages/QuizzesPage';
 
 function NotFoundPage() {
   return (
@@ -98,6 +99,8 @@ export default function App() {
                       <Route path="/tentang" element={<AboutPage />} />
                       <Route path="/founder" element={<FounderPage />} />
                       <Route path="/program" element={<ProgramsPage />} />
+                      <Route path="/kuis" element={<QuizzesPage />} />
+                      <Route path="/kuis/:quizId" element={<QuizzesPage />} />
                       <Route path="/guru" element={<TeachersPage />} />
                       <Route path="/galeri" element={<GalleryPage />} />
                       <Route path="/pengumuman" element={<AnnouncementsPage />} />

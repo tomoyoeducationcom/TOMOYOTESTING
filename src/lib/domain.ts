@@ -1,6 +1,8 @@
 export const ADMIN_UID = 'Tlqf2dNHYCRuYmxgEbHFa783iDs1';
 export const ADMIN_EMAIL = 'tomoyoeducation.com@gmail.com';
 export const ADMIN_WHATSAPP_TARGET = '6281996284733';
+export const FONNTE_SENDER_NUMBER = '6283121902760';
+export const FONNTE_SENDER_DISPLAY = '+62 831-2190-2760';
 
 export const BRAND_IDENTITY = {
   officialName: 'TOMOYO PRIVAT & BIMBEL EDUCATION',
@@ -673,3 +675,67 @@ export function getPaymentStatusLabel(status: PaymentStatus): string {
       return 'Belum Bayar';
   }
 }
+
+export interface FormattedFirebaseAuthError {
+  code: string;
+  message: string;
+  unauthorizedDomain: string | null;
+}
+
+export function formatFirebaseAuthError(
+  error: unknown,
+  currentHostname?: string
+): FormattedFirebaseAuthError {
+  const codeFromObj =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code || '')
+      : '';
+  const rawMessage = error instanceof Error ? error.message : String(error || '');
+  const code =
+    codeFromObj ||
+    (rawMessage.includes('auth/unauthorized-domain')
+      ? 'auth/unauthorized-domain'
+      : '');
+  const host = (currentHostname || '').trim();
+
+  if (code === 'auth/unauthorized-domain') {
+    return {
+      code,
+      unauthorizedDomain: host || null,
+      message: host
+        ? `Domain "${host}" belum masuk ke daftar Authorized Domains di Firebase Authentication (project tomoyoindramayu).`
+        : 'Domain saat ini belum masuk ke daftar Authorized Domains di Firebase Authentication (project tomoyoindramayu).',
+    };
+  }
+
+  if (code === 'auth/popup-closed-by-user') {
+    return {
+      code,
+      unauthorizedDomain: null,
+      message: 'Jendela login Google ditutup sebelum proses selesai.',
+    };
+  }
+
+  if (code === 'auth/cancelled-popup-request') {
+    return {
+      code,
+      unauthorizedDomain: null,
+      message: 'Permintaan login Google sebelumnya dibatalkan. Silakan klik tombol masuk sekali lagi.',
+    };
+  }
+
+  if (code === 'auth/network-request-failed') {
+    return {
+      code,
+      unauthorizedDomain: null,
+      message: 'Koneksi jaringan ke layanan Google/Firebase terputus. Periksa internet Anda lalu coba lagi.',
+    };
+  }
+
+  return {
+    code,
+    unauthorizedDomain: null,
+    message: rawMessage || 'Terjadi kesalahan saat masuk dengan Google.',
+  };
+}
+

@@ -8,6 +8,8 @@
 5. **No Shadow Fields**: Every collection enforces strict `keys().hasAll(...) && keys().hasOnly(...)` on creation and `affectedKeys().hasOnly(...)` on update.
 6. **Temporal Integrity**: `createdAt` and `updatedAt` are validated against `request.time`, and `createdAt` / `parentId` are immutable after creation.
 7. **CMS & Financial Isolation**: Public users may only read published CMS documents (`isPublished == true`). Only Admin may write to CMS collections (`packages`, `branches`, `teachers`, `siteContent`, `gallery`, `announcements`, `schedules`) or `payments`.
+8. **Online Quiz Key Isolation**: Public users may only read published `/quizzes/{quizId}` metadata/questions (never answer keys). Correct answers live strictly in `/quizKeys/{quizId}` (Admin-only) and on the backend server. Quiz attempts (`/quizAttempts/{attemptId}`) are readable/writable only by Admin on Firestore and created/graded strictly on the backend.
+9. **WhatsApp Center & Group Isolation**: `/waGroups`, `/waGroupLogs`, `/waTemplates`, `/waCampaigns`, `/waQueueItems`, `/waSettings`, and `/waOptOuts` are strictly Admin-only and never store `FONNTE_TOKEN`.
 
 ## 2. The "Dirty Dozen" Adversarial Payloads
 1. **Identity Spoofing**: Parent A creates `/students/s1` with `parentId: "parent-B-uid"`. -> Expected: `PERMISSION_DENIED`.
@@ -20,5 +22,5 @@
 8. **ID Poisoning**: Write to `/students/` with 1,500-character document ID or invalid characters (`../hack`). -> Expected: `PERMISSION_DENIED`.
 9. **Resource Exhaustion (1MB String)**: Parent A submits `childName` with 50,000 characters. -> Expected: `PERMISSION_DENIED`.
 10. **CMS Tampering by Parent**: Authenticated parent attempts to update `/packages/paket-1` or `/siteContent/founder`. -> Expected: `PERMISSION_DENIED`.
-11. **Payment Forgery**: Authenticated parent attempts to create `/payments/p1` marked `status: "lunas"`. -> Expected: `PERMISSION_DENIED`.
-12. **Client Timestamp Forgery**: Parent submits `createdAt` with backdated client timestamp instead of `request.time`. -> Expected: `PERMISSION_DENIED`.
+11. **Quiz Answer Key Leakage**: Unauthenticated student or authenticated parent attempts `get` or `list` on `/quizKeys/{quizId}` or `/quizAttempts/{attemptId}`. -> Expected: `PERMISSION_DENIED`.
+12. **WhatsApp Center Tampering**: Non-admin user attempts to read `/waCampaigns/{id}`, `/waTemplates/{id}`, `/waSettings/{id}`, or `/waOptOuts/{id}`. -> Expected: `PERMISSION_DENIED`.

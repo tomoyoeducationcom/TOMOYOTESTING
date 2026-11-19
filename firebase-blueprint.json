@@ -223,6 +223,111 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["registrationId", "parentId", "target", "status", "messagePreview", "createdAt"]
+    },
+    "PublicQuiz": {
+      "title": "PublicQuiz",
+      "description": "Publicly readable quiz metadata and questions WITHOUT answer keys.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 180 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "instructions": { "type": "string", "maxLength": 1500 },
+        "targetClass": { "type": "string", "maxLength": 60 },
+        "status": { "type": "string", "enum": ["draft", "published", "disabled"], "maxLength": 20 },
+        "isPublished": { "type": "boolean" },
+        "timeLimitMinutes": { "type": "number" },
+        "maxAttempts": { "type": "number" },
+        "startAtIso": { "type": "string", "maxLength": 50 },
+        "endAtIso": { "type": "string", "maxLength": 50 },
+        "questionsCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "status", "isPublished", "questionsCount", "createdAt", "updatedAt"]
+    },
+    "QuizKey": {
+      "title": "QuizKey",
+      "description": "Strictly admin-only quiz answer keys and point weights (never readable by students).",
+      "type": "object",
+      "properties": {
+        "quizId": { "type": "string", "maxLength": 128 },
+        "questionCount": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["quizId", "questionCount", "updatedAt"]
+    },
+    "QuizAttempt": {
+      "title": "QuizAttempt",
+      "description": "Graded student quiz submission (Admin read/manage only).",
+      "type": "object",
+      "properties": {
+        "quizId": { "type": "string", "maxLength": 128 },
+        "studentName": { "type": "string", "maxLength": 120 },
+        "studentClass": { "type": "string", "maxLength": 60 },
+        "parentWhatsapp": { "type": "string", "maxLength": 30 },
+        "score": { "type": "number" },
+        "maxScore": { "type": "number" },
+        "correctCount": { "type": "number" },
+        "wrongCount": { "type": "number" },
+        "durationSeconds": { "type": "number" },
+        "submittedAtIso": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["quizId", "studentName", "studentClass", "score", "maxScore", "correctCount", "wrongCount", "submittedAtIso", "createdAt"]
+    },
+    "WaGroupItem": {
+      "title": "WaGroupItem",
+      "description": "Admin-only WhatsApp group record synced from Fonnte.",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 200 },
+        "pinned": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["groupId", "name", "pinned", "updatedAt"]
+    },
+    "WaTemplate": {
+      "title": "WaTemplate",
+      "description": "Admin-only reusable WhatsApp Center message template.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 150 },
+        "category": { "type": "string", "maxLength": 80 },
+        "content": { "type": "string", "maxLength": 4000 },
+        "isEnabled": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "category", "content", "isEnabled", "createdAt", "updatedAt"]
+    },
+    "WaCampaign": {
+      "title": "WaCampaign",
+      "description": "Admin-only mass WhatsApp Center broadcast campaign.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 180 },
+        "status": { "type": "string", "enum": ["draft", "running", "paused", "completed"], "maxLength": 30 },
+        "totalCount": { "type": "number" },
+        "sentCount": { "type": "number" },
+        "failedCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "status", "totalCount", "sentCount", "failedCount", "createdAt", "updatedAt"]
+    },
+    "WaSetting": {
+      "title": "WaSetting",
+      "description": "Admin-only WhatsApp Center automation & queue configuration (never stores API tokens).",
+      "type": "object",
+      "properties": {
+        "settingKey": { "type": "string", "maxLength": 80 },
+        "delaySeconds": { "type": "number" },
+        "batchSize": { "type": "number" },
+        "maxRetries": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["settingKey", "delaySeconds", "batchSize", "maxRetries", "updatedAt"]
     }
   },
   "firestore": {
@@ -269,6 +374,34 @@
     "/notificationLogs/{logId}": {
       "schema": { "$ref": "#/entities/NotificationLog" },
       "description": "Sanitized WhatsApp notification logs."
+    },
+    "/quizzes/{quizId}": {
+      "schema": { "$ref": "#/entities/PublicQuiz" },
+      "description": "Published quiz metadata without answer keys."
+    },
+    "/quizKeys/{quizId}": {
+      "schema": { "$ref": "#/entities/QuizKey" },
+      "description": "Admin-only answer keys for quizzes."
+    },
+    "/quizAttempts/{attemptId}": {
+      "schema": { "$ref": "#/entities/QuizAttempt" },
+      "description": "Admin-only student quiz attempts and scores."
+    },
+    "/waGroups/{groupId}": {
+      "schema": { "$ref": "#/entities/WaGroupItem" },
+      "description": "Admin-only synced WhatsApp groups."
+    },
+    "/waTemplates/{templateId}": {
+      "schema": { "$ref": "#/entities/WaTemplate" },
+      "description": "Admin-only WhatsApp Center templates."
+    },
+    "/waCampaigns/{campaignId}": {
+      "schema": { "$ref": "#/entities/WaCampaign" },
+      "description": "Admin-only WhatsApp Center mass campaigns."
+    },
+    "/waSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/WaSetting" },
+      "description": "Admin-only WhatsApp Center queue and automation settings."
     }
   }
 }

@@ -8,12 +8,13 @@ import {
   signOut,
 } from 'firebase/auth';
 import { auth, googleProvider, testFirestoreConnection } from '../lib/firebase';
-import { isAuthorizedAdminIdentity } from '../lib/domain';
+import { formatFirebaseAuthError, isAuthorizedAdminIdentity } from '../lib/domain';
 
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
   authError: string | null;
+  unauthorizedDomain: string | null;
   isAdmin: boolean;
   signInWithGoogle: () => Promise<User | null>;
   logout: () => Promise<void>;
@@ -26,18 +27,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [unauthorizedDomain, setUnauthorizedDomain] = useState<string | null>(null);
+
+  const currentHostname = () =>
+    typeof window !== 'undefined' ? window.location.hostname : '';
+
+  const applyFormattedError = (err: unknown) => {
+    const formatted = formatFirebaseAuthError(err, currentHostname());
+    setAuthError(formatted.message);
+    setUnauthorizedDomain(formatted.unauthorizedDomain);
+  };
 
   useEffect(() => {
     testFirestoreConnection();
 
     getRedirectResult(auth).catch((err) => {
-      if (err instanceof Error) {
-        setAuthError(err.message);
-      }
+      applyFormattedError(err);
     });
 
     const unsub = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
+      if (currentUser) {
+        setAuthError(null);
+        setUnauthorizedDomain(null);
+      }
       setLoading(false);
     });
 
@@ -46,6 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = async (): Promise<User | null> => {
     setAuthError(null);
+    setUnauthorizedDomain(null);
     try {
       const result = await signInWithPopup(auth, googleProvider);
       if (!result.user.emailVerified) {
@@ -64,29 +78,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           await signInWithRedirect(auth, googleProvider);
           return null;
         } catch (redirectError) {
-          setAuthError(
-            redirectError instanceof Error
-              ? redirectError.message
-              : 'Gagal memulai login Google.'
-          );
+          applyFormattedError(redirectError);
           return null;
         }
       }
 
-      if (code === 'auth/popup-closed-by-user') {
-        setAuthError('Jendela login Google ditutup sebelum proses selesai.');
-        return null;
-      }
-
-      setAuthError(
-        error instanceof Error ? error.message : 'Terjadi kesalahan saat masuk dengan Google.'
-      );
+      applyFormattedError(error);
       return null;
     }
   };
 
   const logout = async () => {
     setAuthError(null);
+    setUnauthorizedDomain(null);
     await signOut(auth);
   };
 
@@ -105,10 +109,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         loading,
         authError,
+        unauthorizedDomain,
         isAdmin,
         signInWithGoogle,
         logout,
-        clearAuthError: () => setAuthError(null),
+        clearAuthError: () => {
+          setAuthError(null);
+          setUnauthorizedDomain(null);
+        },
       }}
     >
       {children}

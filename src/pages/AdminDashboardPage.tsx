@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BellRing,
+  BookOpen,
   CalendarClock,
   Check,
   CheckCircle2,
@@ -11,6 +12,7 @@ import {
   LogOut,
   MessageSquare,
   Printer,
+  Radio,
   RefreshCw,
   Search,
   Send,
@@ -33,6 +35,8 @@ import {
   BRAND_IDENTITY,
   BranchId,
   ChildGender,
+  FONNTE_SENDER_DISPLAY,
+  FONNTE_SENDER_NUMBER,
   OfflineRegistrationDraft,
   PackageId,
   PaymentRecord,
@@ -64,11 +68,17 @@ import {
 } from '../lib/firestoreService';
 import { GoogleSignInButton } from '../components/GoogleSignInButton';
 import { AdminCmsPanel } from '../components/AdminCmsPanel';
+import { AdminQuizPanel } from '../components/AdminQuizPanel';
+import { AdminWaGroupPanel } from '../components/AdminWaGroupPanel';
+import { AdminWaCenterPanel } from '../components/AdminWaCenterPanel';
 
 type AdminTab =
   | 'overview'
   | 'students'
   | 'offline'
+  | 'quizzes'
+  | 'wagroup'
+  | 'wacenter'
   | 'cms'
   | 'payments'
   | 'reports'
@@ -107,7 +117,7 @@ function createInitialOfflineDraft(): OfflineRegistrationDraft {
 }
 
 export function AdminDashboardPage() {
-  const { user, loading: authLoading, authError, logout } = useAuth();
+  const { user, loading: authLoading, authError, unauthorizedDomain, logout } = useAuth();
   const { refresh: refreshPublicSite } = useSiteData();
 
   const [serverAuthState, setServerAuthState] = useState<{
@@ -398,8 +408,13 @@ export function AdminDashboardPage() {
           </div>
 
           {authError && (
-            <div role="alert" className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800">
-              {authError}
+            <div role="alert" className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 space-y-1.5">
+              <p className="font-medium">{authError}</p>
+              {unauthorizedDomain && (
+                <p className="text-[11px] text-rose-700">
+                  Tambahkan <code className="font-mono font-semibold bg-white px-1 py-0.5 rounded border border-rose-200">{unauthorizedDomain}</code> ke Authorized Domains Firebase project <code className="font-mono">tomoyoindramayu</code>.
+                </p>
+              )}
             </div>
           )}
 
@@ -779,7 +794,7 @@ export function AdminDashboardPage() {
   return (
     <div className="min-h-screen flex flex-col lg:flex-row">
       {/* Sidebar */}
-      <aside className="lg:w-64 bg-slate-900/95 backdrop-blur-xl text-slate-200 border-b lg:border-b-0 lg:border-r border-slate-800 shrink-0 no-print">
+      <aside className="lg:w-64 bg-[#121820] text-slate-200 border-b lg:border-b-0 lg:border-r border-slate-800 shrink-0 no-print">
         <div className="p-5 border-b border-slate-800 flex items-center gap-3">
           <img
             src={BRAND_IDENTITY.emblemLogoPath}
@@ -798,6 +813,9 @@ export function AdminDashboardPage() {
             { id: 'overview', label: 'Ringkasan', icon: LayoutDashboard },
             { id: 'students', label: 'Siswa & Pendaftaran', icon: Users },
             { id: 'offline', label: 'Pendaftaran Offline', icon: UserPlus },
+            { id: 'quizzes', label: 'Kuis Online', icon: BookOpen },
+            { id: 'wagroup', label: 'WhatsApp Group', icon: Users },
+            { id: 'wacenter', label: 'WhatsApp Center', icon: Radio },
             { id: 'cms', label: 'CMS Website', icon: Settings },
             { id: 'payments', label: 'Pembayaran', icon: CreditCard },
             { id: 'reports', label: 'Laporan & Ekspor PDF', icon: FileText },
@@ -812,7 +830,7 @@ export function AdminDashboardPage() {
                 onClick={() => setActiveTab(item.id as AdminTab)}
                 className={`flex items-center justify-between gap-2 px-3.5 py-2.5 min-h-[42px] rounded-xl text-sm font-medium transition-colors whitespace-nowrap cursor-pointer ${
                   active
-                    ? 'bg-rose-700 text-white font-semibold shadow-sm'
+                    ? 'bg-[#BE123C] text-white font-semibold'
                     : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                 }`}
               >
@@ -822,8 +840,8 @@ export function AdminDashboardPage() {
                 </span>
                 {typeof item.badge === 'number' && item.badge > 0 && (
                   <span
-                    className={`px-2 py-0.5 text-[11px] font-bold rounded-full tabular-nums ${
-                      active ? 'bg-white text-rose-700' : 'bg-rose-600 text-white'
+                    className={`px-2 py-0.5 text-[11px] font-mono font-bold rounded-lg tabular-nums ${
+                      active ? 'bg-white text-[#BE123C]' : 'bg-[#BE123C] text-white'
                     }`}
                   >
                     {item.badge}
@@ -848,12 +866,15 @@ export function AdminDashboardPage() {
 
       {/* Main Viewport */}
       <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-6xl w-full space-y-6">
-        <div className="flex items-center justify-between gap-4 border-b border-slate-200/70 pb-4 no-print">
+        <div className="flex items-center justify-between gap-4 border-b border-[#DFDCD3] pb-4 no-print">
           <div>
-            <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900">
+            <h1 className="font-display text-2xl sm:text-3xl font-bold text-[#121820]">
               {activeTab === 'overview' && 'Ringkasan Lembaga'}
               {activeTab === 'students' && 'Manajemen Siswa & Pendaftaran'}
               {activeTab === 'offline' && 'Pendaftaran Siswa Offline (Input Admin)'}
+              {activeTab === 'quizzes' && 'Manajemen Kuis Online Siswa'}
+              {activeTab === 'wagroup' && 'WhatsApp Group Resmi (Fonnte)'}
+              {activeTab === 'wacenter' && 'WhatsApp Center & Siaran Pesan'}
               {activeTab === 'cms' && 'CMS Konten Website'}
               {activeTab === 'payments' && 'Catatan Pembayaran Manual'}
               {activeTab === 'reports' && 'Pusat Ekspor PDF & Invoice'}
@@ -2205,9 +2226,15 @@ export function AdminDashboardPage() {
                   <h2 className="text-base font-bold text-slate-900">
                     Status Integrasi WhatsApp Fonnte
                   </h2>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                     <div className="p-4 rounded-xl ios-glass-subtle">
-                      <p className="text-xs text-slate-500">Nomor Pengirim / Penerima Admin</p>
+                      <p className="text-xs text-slate-500">Nomor Pengirim (Device Fonnte)</p>
+                      <p className="font-mono font-bold text-slate-900 mt-1">
+                        {FONNTE_SENDER_DISPLAY} ({FONNTE_SENDER_NUMBER})
+                      </p>
+                    </div>
+                    <div className="p-4 rounded-xl ios-glass-subtle">
+                      <p className="text-xs text-slate-500">Nomor Penerima Notifikasi Admin</p>
                       <p className="font-mono font-bold text-slate-900 mt-1">
                         {ADMIN_WHATSAPP_TARGET}
                       </p>
@@ -2436,6 +2463,21 @@ export function AdminDashboardPage() {
                   )}
                 </div>
               </div>
+            )}
+
+            {/* KUIS ONLINE TAB */}
+            {activeTab === 'quizzes' && <AdminQuizPanel user={user} />}
+
+            {/* WHATSAPP GROUP TAB */}
+            {activeTab === 'wagroup' && <AdminWaGroupPanel user={user} />}
+
+            {/* WHATSAPP CENTER TAB */}
+            {activeTab === 'wacenter' && (
+              <AdminWaCenterPanel
+                user={user}
+                students={bundle?.students || []}
+                packages={bundle?.packages || []}
+              />
             )}
           </>
         )}

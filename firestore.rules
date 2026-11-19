@@ -229,6 +229,100 @@ service cloud.firestore {
         && data.createdAt is timestamp;
     }
 
+    function isValidPublicQuiz(data) {
+      return data.keys().hasAll(['title', 'status', 'isPublished', 'questionsCount', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'title', 'description', 'instructions', 'targetClass', 'status',
+          'isPublished', 'timeLimitMinutes', 'maxAttempts', 'startAtIso', 'endAtIso',
+          'questionsCount', 'createdAt', 'updatedAt'
+        ])
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 180
+        && (!('description' in data) || (data.description is string && data.description.size() <= 1000))
+        && (!('instructions' in data) || (data.instructions is string && data.instructions.size() <= 1500))
+        && (!('targetClass' in data) || (data.targetClass is string && data.targetClass.size() <= 60))
+        && data.status in ['draft', 'published', 'disabled']
+        && data.isPublished is bool
+        && (!('timeLimitMinutes' in data) || (data.timeLimitMinutes is number && data.timeLimitMinutes >= 0))
+        && (!('maxAttempts' in data) || (data.maxAttempts is number && data.maxAttempts >= 0))
+        && (!('startAtIso' in data) || (data.startAtIso is string && data.startAtIso.size() <= 50))
+        && (!('endAtIso' in data) || (data.endAtIso is string && data.endAtIso.size() <= 50))
+        && data.questionsCount is number && data.questionsCount >= 0 && data.questionsCount <= 100
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidQuizKey(data) {
+      return data.keys().hasAll(['quizId', 'questionCount', 'updatedAt'])
+        && data.keys().hasOnly(['quizId', 'questionCount', 'updatedAt'])
+        && data.quizId is string && data.quizId.size() >= 1 && data.quizId.size() <= 128
+        && data.questionCount is number && data.questionCount >= 0 && data.questionCount <= 100
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidQuizAttempt(data) {
+      return data.keys().hasAll([
+          'quizId', 'studentName', 'studentClass', 'score', 'maxScore',
+          'correctCount', 'wrongCount', 'submittedAtIso', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'quizId', 'studentName', 'studentClass', 'parentWhatsapp', 'score', 'maxScore',
+          'correctCount', 'wrongCount', 'durationSeconds', 'submittedAtIso', 'createdAt'
+        ])
+        && data.quizId is string && data.quizId.size() >= 1 && data.quizId.size() <= 128
+        && data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 120
+        && data.studentClass is string && data.studentClass.size() >= 1 && data.studentClass.size() <= 60
+        && (!('parentWhatsapp' in data) || (data.parentWhatsapp is string && data.parentWhatsapp.size() <= 30))
+        && data.score is number && data.score >= 0
+        && data.maxScore is number && data.maxScore >= 0
+        && data.correctCount is number && data.correctCount >= 0
+        && data.wrongCount is number && data.wrongCount >= 0
+        && (!('durationSeconds' in data) || (data.durationSeconds is number && data.durationSeconds >= 0))
+        && data.submittedAtIso is string && data.submittedAtIso.size() <= 50
+        && data.createdAt is timestamp;
+    }
+
+    function isValidWaGroup(data) {
+      return data.keys().hasAll(['groupId', 'name', 'pinned', 'updatedAt'])
+        && data.keys().hasOnly(['groupId', 'name', 'pinned', 'updatedAt'])
+        && data.groupId is string && data.groupId.size() >= 1 && data.groupId.size() <= 128
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 200
+        && data.pinned is bool
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidWaTemplate(data) {
+      return data.keys().hasAll(['name', 'category', 'content', 'isEnabled', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['name', 'category', 'content', 'isEnabled', 'createdAt', 'updatedAt'])
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 150
+        && data.category is string && data.category.size() >= 1 && data.category.size() <= 80
+        && data.content is string && data.content.size() >= 1 && data.content.size() <= 4000
+        && data.isEnabled is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidWaCampaign(data) {
+      return data.keys().hasAll(['title', 'status', 'totalCount', 'sentCount', 'failedCount', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['title', 'status', 'totalCount', 'sentCount', 'failedCount', 'createdAt', 'updatedAt'])
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 180
+        && data.status in ['draft', 'running', 'paused', 'completed']
+        && data.totalCount is number && data.totalCount >= 0
+        && data.sentCount is number && data.sentCount >= 0
+        && data.failedCount is number && data.failedCount >= 0
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidWaSetting(data) {
+      return data.keys().hasAll(['settingKey', 'delaySeconds', 'batchSize', 'maxRetries', 'updatedAt'])
+        && data.keys().hasOnly(['settingKey', 'delaySeconds', 'batchSize', 'maxRetries', 'updatedAt'])
+        && data.settingKey is string && data.settingKey.size() >= 1 && data.settingKey.size() <= 80
+        && data.delaySeconds is number && data.delaySeconds >= 1 && data.delaySeconds <= 120
+        && data.batchSize is number && data.batchSize >= 1 && data.batchSize <= 50
+        && data.maxRetries is number && data.maxRetries >= 0 && data.maxRetries <= 5
+        && data.updatedAt is timestamp;
+    }
+
     // Connection test doc
     match /test/{docId} {
       allow get: if docId == 'connection';
@@ -401,6 +495,83 @@ service cloud.firestore {
         && incoming().createdAt == request.time;
       allow update: if false;
       allow delete: if isValidId(logId) && isAdmin();
+    }
+
+    // Online Quizzes (Public metadata without answer keys, Admin write)
+    match /quizzes/{quizId} {
+      allow get: if isValidId(quizId) && (resource == null || existing().isPublished == true || isAdmin());
+      allow list: if isAdmin() || existing().isPublished == true;
+      allow create: if isValidId(quizId) && isAdmin() && isValidPublicQuiz(incoming())
+        && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(quizId) && isAdmin() && isValidPublicQuiz(incoming())
+        && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'description', 'instructions', 'targetClass', 'status',
+          'isPublished', 'timeLimitMinutes', 'maxAttempts', 'startAtIso', 'endAtIso',
+          'questionsCount', 'updatedAt'
+        ]);
+      allow delete: if isValidId(quizId) && isAdmin();
+    }
+
+    // Quiz Keys (Strictly Admin-only)
+    match /quizKeys/{quizId} {
+      allow get: if isValidId(quizId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(quizId) && isAdmin() && isValidQuizKey(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(quizId) && isAdmin() && isValidQuizKey(incoming()) && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['quizId', 'questionCount', 'updatedAt']);
+      allow delete: if isValidId(quizId) && isAdmin();
+    }
+
+    // Quiz Attempts (Strictly Admin-only in Firestore; created/graded via backend)
+    match /quizAttempts/{attemptId} {
+      allow get: if isValidId(attemptId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(attemptId) && isAdmin() && isValidQuizAttempt(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(attemptId) && isAdmin();
+    }
+
+    // WhatsApp Groups & Center Collections (Strictly Admin-only)
+    match /waGroups/{groupId} {
+      allow get: if isValidId(groupId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(groupId) && isAdmin() && isValidWaGroup(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(groupId) && isAdmin() && isValidWaGroup(incoming()) && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['groupId', 'name', 'pinned', 'updatedAt']);
+      allow delete: if isValidId(groupId) && isAdmin();
+    }
+
+    match /waTemplates/{templateId} {
+      allow get: if isValidId(templateId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(templateId) && isAdmin() && isValidWaTemplate(incoming())
+        && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(templateId) && isAdmin() && isValidWaTemplate(incoming())
+        && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'category', 'content', 'isEnabled', 'updatedAt']);
+      allow delete: if isValidId(templateId) && isAdmin();
+    }
+
+    match /waCampaigns/{campaignId} {
+      allow get: if isValidId(campaignId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(campaignId) && isAdmin() && isValidWaCampaign(incoming())
+        && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(campaignId) && isAdmin() && isValidWaCampaign(incoming())
+        && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'status', 'totalCount', 'sentCount', 'failedCount', 'updatedAt']);
+      allow delete: if isValidId(campaignId) && isAdmin();
+    }
+
+    match /waSettings/{settingId} {
+      allow get: if isValidId(settingId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(settingId) && isAdmin() && isValidWaSetting(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(settingId) && isAdmin() && isValidWaSetting(incoming()) && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['settingKey', 'delaySeconds', 'batchSize', 'maxRetries', 'updatedAt']);
+      allow delete: if isValidId(settingId) && isAdmin();
     }
   }
 }

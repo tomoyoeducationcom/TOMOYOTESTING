@@ -31,32 +31,31 @@ export function PackagesSection({
 }) {
   const Heading = headingTag;
   return (
-    <section id="program-belajar" className="py-14 sm:py-18">
+    <section id="program-belajar" className="py-14 sm:py-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="max-w-2xl mx-auto text-center space-y-2.5 mb-10">
-          <p className="text-xs font-semibold tracking-wider text-rose-700 uppercase">
-            Program Resmi
-          </p>
-          <Heading className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
-            Tiga Paket Belajar TOMOYO Education
-          </Heading>
-          <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
-            Struktur bimbingan yang terarah sesuai jenjang pendidikan anak, tersedia untuk cabang Indramayu Kota dan Kecamatan Terisi.
-          </p>
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10 pb-6 border-b border-[#DFDCD3]">
+          <div className="max-w-2xl space-y-2">
+            <p className="text-xs font-semibold tracking-[0.14em] text-[#BE123C] uppercase">
+              Kurikulum &amp; Program Resmi
+            </p>
+            <Heading className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-[#121820]">
+              Tiga Paket Belajar TOMOYO Education
+            </Heading>
+            <p className="text-sm sm:text-base text-[#3F4A59] leading-relaxed">
+              Struktur bimbingan terarah sesuai jenjang pendidikan anak di Indramayu Kota (Pusat) dan Kecamatan Terisi (Cabang).
+            </p>
+          </div>
           {showAllLink && (
-            <div className="pt-1">
-              <Link
-                to="/program"
-                className="inline-flex items-center justify-center gap-1.5 text-sm font-semibold text-rose-700 hover:text-rose-800 transition-colors whitespace-nowrap"
-              >
-                <span>Lihat Detail Program</span>
-                <ArrowRight className="w-4 h-4" />
-              </Link>
-            </div>
+            <Link
+              to="/program"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#BE123C] hover:text-[#9F1239] transition-colors whitespace-nowrap shrink-0"
+            >
+              <span>Lihat Detail Program</span>
+              <ArrowRight className="w-4 h-4" />
+            </Link>
           )}
         </div>
 
-        {/* 3 Paket Sejajar Horizontal (3 kolom di layar md ke atas) */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
           {packages.map((pkg, idx) => {
             const explicitPusat = parseRupiahAmount(pkg.pricePusat);
@@ -69,15 +68,16 @@ export function PackagesSection({
 
             return (
               <article
+                id={`paket-${idx + 1}`}
                 key={pkg.id}
-                className="ios-glass rounded-3xl p-6 sm:p-7 flex flex-col justify-between transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl"
+                className="editorial-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between transition-transform duration-200 hover:-translate-y-0.5"
               >
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between gap-3 border-b border-slate-200/70 pb-3.5">
-                    <span className="font-mono text-xs font-semibold text-slate-500 tabular-nums">
-                      0{idx + 1}
+                <div className="space-y-5">
+                  <div className="flex items-center justify-between gap-3 border-b border-[#DFDCD3] pb-3.5 text-xs">
+                    <span className="font-mono font-semibold text-[#626E7E] tabular-nums">
+                      PAKET 0{idx + 1}
                     </span>
-                    <span className="text-xs font-semibold text-emerald-700">
+                    <span className="font-semibold text-[#0F766E]">
                       {pkg.slug === 'paket-1'
                         ? 'CALISTUNG'
                         : pkg.slug === 'paket-3'
@@ -86,88 +86,95 @@ export function PackagesSection({
                     </span>
                   </div>
 
-                  <div className="text-center space-y-1.5">
-                    <h3 className="text-xl font-extrabold text-slate-900 leading-snug">
+                  <div className="space-y-1">
+                    <h3 className="font-display text-2xl font-bold text-[#121820] leading-snug">
                       {pkg.title}
                     </h3>
-                    <p className="text-sm font-semibold text-rose-700">
-                      {pkg.levelRange === pkg.title.replace(/^PAKET \d+:\s*/, '')
-                        ? pkg.programType
-                        : `${pkg.levelRange} · ${pkg.programType}`}
+                    <p className="text-sm font-medium text-[#BE123C]">
+                      {(() => {
+                        const cleanTitleRange = pkg.title.replace(/^PAKET \d+:\s*/i, '').trim().toLowerCase();
+                        const lr = pkg.levelRange.trim();
+                        const pt = pkg.programType.trim();
+                        if (lr.toLowerCase() === cleanTitleRange) return pt;
+                        if (lr.toLowerCase().includes(pt.toLowerCase()) || pt.toLowerCase().includes(lr.toLowerCase())) {
+                          return lr.length >= pt.length ? lr : pt;
+                        }
+                        return `${lr} · ${pt}`;
+                      })()}
                     </p>
                   </div>
 
                   {hasBranchPrices ? (
-                    <div className="ios-glass-subtle rounded-2xl p-3.5 space-y-2 text-xs">
+                    <div className="editorial-card-subtle rounded-xl p-4 space-y-2.5 text-xs">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-slate-600">Pusat (Indramayu Kota)</span>
-                        <span className="font-mono font-extrabold text-slate-900 tabular-nums">
+                        <span className="font-semibold text-[#3F4A59]">Pusat (Indramayu Kota)</span>
+                        <span className="font-mono font-bold text-[#121820] tabular-nums">
                           {pricePusat !== null ? formatRupiah(pricePusat) : 'Belum diatur admin'}
                         </span>
                       </div>
                       {notePusat && (
-                        <p className="text-[11px] text-slate-500 text-right">{notePusat}</p>
+                        <p className="text-[11px] text-[#626E7E] text-right">{notePusat}</p>
                       )}
-                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200/60">
-                        <span className="font-semibold text-slate-600">Cabang (Terisi)</span>
-                        <span className="font-mono font-extrabold text-slate-900 tabular-nums">
+                      <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-[#DFDCD3]">
+                        <span className="font-semibold text-[#3F4A59]">Cabang (Terisi)</span>
+                        <span className="font-mono font-bold text-[#121820] tabular-nums">
                           {priceCabang !== null ? formatRupiah(priceCabang) : 'Belum diatur admin'}
                         </span>
                       </div>
                       {noteCabang && (
-                        <p className="text-[11px] text-slate-500 text-right">{noteCabang}</p>
+                        <p className="text-[11px] text-[#626E7E] text-right">{noteCabang}</p>
                       )}
                     </div>
                   ) : pkg.priceLabel && pkg.priceLabel.trim() !== '' ? (
-                    <div className="ios-glass-subtle rounded-2xl px-4 py-3 text-center space-y-0.5">
-                      <p className="text-lg font-extrabold text-slate-900 font-mono tabular-nums">
+                    <div className="editorial-card-subtle rounded-xl px-4 py-3 space-y-0.5">
+                      <p className="text-lg font-bold text-[#121820] font-mono tabular-nums">
                         {pkg.priceLabel}
                       </p>
                       {pkg.priceNote && pkg.priceNote.trim() !== '' && (
-                        <p className="text-xs text-slate-600">{pkg.priceNote}</p>
+                        <p className="text-xs text-[#626E7E]">{pkg.priceNote}</p>
                       )}
                     </div>
                   ) : (
-                    <div className="ios-glass-subtle rounded-2xl px-4 py-2.5 text-center">
-                      <p className="text-xs font-medium text-slate-500">
-                        Tarif resmi Pusat &amp; Cabang belum diatur oleh admin
+                    <div className="editorial-card-subtle rounded-xl px-4 py-3">
+                      <p className="text-xs font-medium text-[#626E7E]">
+                        Tarif resmi Pusat &amp; Cabang diperbarui langsung melalui CMS pengelola.
                       </p>
                     </div>
                   )}
 
-                  <div className="space-y-2.5 pt-1">
-                    <p className="text-xs font-semibold text-slate-500 text-center uppercase tracking-wider">
+                  <div className="space-y-2.5">
+                    <p className="text-xs font-semibold text-[#626E7E] uppercase tracking-wider">
                       Fokus Pembelajaran
                     </p>
                     <ul className="space-y-2">
                       {pkg.subjects.map((subj) => (
-                      <li
-                        key={subj}
-                        className="flex items-start gap-2.5 text-sm text-slate-800"
-                      >
-                        <BookOpen className="w-4 h-4 text-rose-700 mt-0.5 shrink-0" />
-                        <span>{subj}</span>
-                      </li>
-                    ))}
-                  </ul>
+                        <li
+                          key={subj}
+                          className="flex items-start gap-2.5 text-sm text-[#121820]"
+                        >
+                          <BookOpen className="w-4 h-4 text-[#BE123C] mt-0.5 shrink-0" />
+                          <span>{subj}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {pkg.description && (
+                    <p className="text-sm text-[#3F4A59] leading-relaxed pt-3 border-t border-[#DFDCD3]">
+                      {pkg.description}
+                    </p>
+                  )}
                 </div>
 
-                {pkg.description && (
-                  <p className="text-sm text-slate-600 leading-relaxed pt-3 border-t border-slate-200/70 text-center">
-                    {pkg.description}
-                  </p>
-                )}
-              </div>
-
-              <div className="mt-6 pt-4 border-t border-slate-200/70">
+                <div className="mt-6 pt-4 border-t border-[#DFDCD3]">
                   <Link
                     to={`/daftar?paket=${pkg.slug}`}
-                    className="inline-flex items-center justify-center gap-2.5 w-full px-4 py-3 min-h-[48px] text-sm font-bold text-white bg-slate-900 hover:bg-rose-700 rounded-2xl shadow-md transition-colors whitespace-nowrap"
+                    className="inline-flex items-center justify-center gap-2.5 w-full px-4 py-3 min-h-[46px] text-sm font-semibold text-white bg-[#121820] hover:bg-[#BE123C] rounded-xl transition-colors whitespace-nowrap"
                   >
                     <span className="w-5 h-5 rounded-full bg-white flex items-center justify-center shrink-0">
                       <GoogleOfficialIcon className="w-3.5 h-3.5" />
                     </span>
-                    <span>DAFTAR SEKARANG</span>
+                    <span>Daftar Paket Ini</span>
                   </Link>
                 </div>
               </article>
@@ -181,39 +188,41 @@ export function PackagesSection({
 
 export function PhilosophySection({ about }: { about: SiteContentSection }) {
   return (
-    <section className="py-14 sm:py-18">
+    <section className="py-14 sm:py-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="max-w-2xl mx-auto text-center space-y-2.5 mb-10">
-          <p className="text-xs font-semibold tracking-wider text-rose-700 uppercase">
-            Filosofi Brand
-          </p>
-          <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
-            Makna Nama TOMOYO
-          </h2>
-        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
+          <div className="lg:col-span-5 space-y-5">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold tracking-[0.14em] text-[#BE123C] uppercase">
+                Filosofi Pendidikan
+              </p>
+              <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-[#121820]">
+                Makna Nama TOMOYO
+              </h2>
+            </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          <div className="lg:col-span-5 space-y-4">
-            <blockquote className="text-lg sm:text-xl font-semibold text-slate-900 leading-relaxed ios-glass-strong rounded-3xl p-6 text-center">
+            <blockquote className="text-lg sm:text-xl font-semibold text-[#121820] leading-relaxed editorial-card rounded-2xl p-6">
               “{about.subtitle || BRAND_IDENTITY.meaning}”
             </blockquote>
-            <p className="text-sm text-slate-600 leading-relaxed ios-glass-subtle rounded-2xl p-5 text-center">
+
+            <p className="text-sm text-[#3F4A59] leading-relaxed editorial-card-subtle rounded-2xl p-5">
               {about.body || BRAND_IDENTITY.philosophyNote}
             </p>
+
             {(about.vision || about.mission) && (
               <div className="space-y-4 pt-1">
                 {about.vision && (
-                  <div className="ios-glass rounded-2xl p-5 text-center">
-                    <h3 className="text-sm font-bold text-slate-900 mb-1.5">Visi</h3>
-                    <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
+                  <div className="editorial-card rounded-2xl p-5">
+                    <h3 className="text-sm font-bold text-[#121820] mb-1.5">Visi</h3>
+                    <p className="text-sm text-[#3F4A59] leading-relaxed whitespace-pre-line">
                       {about.vision}
                     </p>
                   </div>
                 )}
                 {about.mission && (
-                  <div className="ios-glass rounded-2xl p-5 text-center">
-                    <h3 className="text-sm font-bold text-slate-900 mb-1.5">Misi</h3>
-                    <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
+                  <div className="editorial-card rounded-2xl p-5">
+                    <h3 className="text-sm font-bold text-[#121820] mb-1.5">Misi</h3>
+                    <p className="text-sm text-[#3F4A59] leading-relaxed whitespace-pre-line">
                       {about.mission}
                     </p>
                   </div>
@@ -226,14 +235,14 @@ export function PhilosophySection({ about }: { about: SiteContentSection }) {
             {TOMOYO_PHILOSOPHY.map((item, idx) => (
               <div
                 key={`${item.letter}-${idx}`}
-                className="ios-glass rounded-2xl p-5 flex items-start gap-4"
+                className="editorial-card rounded-2xl p-5 flex items-start gap-4"
               >
-                <span className="w-11 h-11 rounded-xl bg-rose-700 text-white font-extrabold text-xl flex items-center justify-center shrink-0 shadow-sm">
+                <span className="w-11 h-11 rounded-xl bg-[#121820] text-[#D9F99D] font-display font-bold text-2xl flex items-center justify-center shrink-0">
                   {item.letter}
                 </span>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900">{item.word}</h3>
-                  <p className="text-sm text-slate-600 mt-0.5 leading-relaxed">{item.meaning}</p>
+                  <h3 className="text-base font-bold text-[#121820]">{item.word}</h3>
+                  <p className="text-sm text-[#3F4A59] mt-0.5 leading-relaxed">{item.meaning}</p>
                 </div>
               </div>
             ))}
@@ -250,11 +259,11 @@ export function FounderSection({ founder }: { founder: SiteContentSection }) {
   const role = founder.founderRole || BRAND_IDENTITY.founderRole;
 
   return (
-    <section className="py-14 sm:py-18">
+    <section className="py-14 sm:py-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="ios-glass-strong rounded-3xl p-6 sm:p-10 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+        <div className="editorial-card rounded-2xl p-6 sm:p-10 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
           <div className="lg:col-span-5 flex justify-center">
-            <div className="w-full max-w-sm ios-glass rounded-2xl overflow-hidden p-2">
+            <div className="w-full max-w-sm bg-[#EFECE4] border border-[#DFDCD3] rounded-2xl p-2">
               <div className="aspect-[858/1280] w-full relative rounded-xl overflow-hidden">
                 <img
                   src={photoSrc}
@@ -266,19 +275,19 @@ export function FounderSection({ founder }: { founder: SiteContentSection }) {
             </div>
           </div>
 
-          <div className="lg:col-span-7 space-y-4 text-center lg:text-left">
-            <p className="text-xs font-semibold tracking-wider text-rose-700 uppercase">
+          <div className="lg:col-span-7 space-y-4">
+            <p className="text-xs font-semibold tracking-[0.14em] text-[#BE123C] uppercase">
               Pimpinan Lembaga
             </p>
-            <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
+            <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-[#121820]">
               {name}
             </h2>
-            <p className="text-base font-semibold text-emerald-700">{role}</p>
-            <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
+            <p className="text-sm font-semibold text-[#0F766E]">{role}</p>
+            <p className="text-sm sm:text-base text-[#3F4A59] leading-relaxed">
               {BRAND_IDENTITY.officialName} hadir sebagai pendamping belajar bagi siswa tingkat TK hingga Kelas 6 SD untuk membangun kemandirian, kepercayaan diri, dan kesiapan akademik yang kuat.
             </p>
             {founder.founderBio && (
-              <p className="text-sm sm:text-base text-slate-700 leading-relaxed whitespace-pre-line pt-3 border-t border-slate-200/70">
+              <p className="text-sm sm:text-base text-[#121820] leading-relaxed whitespace-pre-line pt-4 border-t border-[#DFDCD3]">
                 {founder.founderBio}
               </p>
             )}
@@ -297,28 +306,28 @@ export function TeachersSection({
   compact?: boolean;
 }) {
   return (
-    <section className="py-14 sm:py-18">
+    <section className="py-14 sm:py-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="max-w-2xl mx-auto text-center space-y-2.5 mb-10">
-          <p className="text-xs font-semibold tracking-wider text-rose-700 uppercase">
-            Tenaga Pendidik
-          </p>
-          <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
-            Daftar Guru &amp; Pengajar Resmi
-          </h2>
-          <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
-            Tim pengajar resmi {BRAND_IDENTITY.officialName}.
-          </p>
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10 pb-6 border-b border-[#DFDCD3]">
+          <div className="max-w-2xl space-y-2">
+            <p className="text-xs font-semibold tracking-[0.14em] text-[#BE123C] uppercase">
+              Tenaga Pendidik
+            </p>
+            <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-[#121820]">
+              Daftar Guru &amp; Pengajar Resmi
+            </h2>
+            <p className="text-sm sm:text-base text-[#3F4A59] leading-relaxed">
+              Tim pengajar resmi {BRAND_IDENTITY.officialName}.
+            </p>
+          </div>
           {compact && (
-            <div className="pt-1">
-              <Link
-                to="/guru"
-                className="inline-flex items-center justify-center gap-1.5 text-sm font-semibold text-rose-700 hover:text-rose-800 transition-colors whitespace-nowrap"
-              >
-                <span>Lihat Halaman Guru</span>
-                <ArrowRight className="w-4 h-4" />
-              </Link>
-            </div>
+            <Link
+              to="/guru"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#BE123C] hover:text-[#9F1239] transition-colors whitespace-nowrap shrink-0"
+            >
+              <span>Lihat Halaman Guru</span>
+              <ArrowRight className="w-4 h-4" />
+            </Link>
           )}
         </div>
 
@@ -326,26 +335,26 @@ export function TeachersSection({
           {teachers.map((teacher, idx) => (
             <article
               key={teacher.id}
-              className="ios-glass rounded-2xl p-5 flex items-center gap-4"
+              className="editorial-card rounded-2xl p-5 flex items-center gap-4"
             >
               {teacher.photoUrl ? (
                 <img
                   src={teacher.photoUrl}
                   alt={teacher.name}
-                  className="w-14 h-14 rounded-xl object-cover object-top border border-white shrink-0 shadow-sm"
+                  className="w-14 h-14 rounded-xl object-cover object-top border border-[#DFDCD3] shrink-0"
                   referrerPolicy="no-referrer"
                 />
               ) : (
-                <div className="w-12 h-12 rounded-xl ios-glass-subtle text-slate-700 font-mono text-sm font-bold flex items-center justify-center shrink-0 tabular-nums">
+                <div className="w-12 h-12 rounded-xl bg-[#EFECE4] border border-[#DFDCD3] text-[#121820] font-mono text-sm font-bold flex items-center justify-center shrink-0 tabular-nums">
                   {String(idx + 1).padStart(2, '0')}
                 </div>
               )}
               <div className="min-w-0">
-                <h3 className="text-sm sm:text-base font-bold text-slate-900 leading-snug break-words">
+                <h3 className="text-sm sm:text-base font-bold text-[#121820] leading-snug break-words">
                   {teacher.name}
                 </h3>
                 {teacher.description && (
-                  <p className="mt-1 text-xs sm:text-sm text-slate-600 leading-relaxed">
+                  <p className="mt-1 text-xs sm:text-sm text-[#3F4A59] leading-relaxed">
                     {teacher.description}
                   </p>
                 )}
@@ -360,17 +369,17 @@ export function TeachersSection({
 
 export function BranchesSection({ branches }: { branches: BranchLocation[] }) {
   return (
-    <section className="py-14 sm:py-18">
+    <section className="py-14 sm:py-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="max-w-2xl mx-auto text-center space-y-2.5 mb-10">
-          <p className="text-xs font-semibold tracking-wider text-rose-700 uppercase">
-            Lokasi Belajar
+        <div className="max-w-2xl space-y-2 mb-10 pb-6 border-b border-[#DFDCD3]">
+          <p className="text-xs font-semibold tracking-[0.14em] text-[#BE123C] uppercase">
+            Lokasi Belajar di Indramayu
           </p>
-          <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
+          <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-[#121820]">
             Cabang Resmi TOMOYO Education
           </h2>
-          <p className="text-sm sm:text-base text-slate-600 leading-relaxed">
-            Pratinjau peta sesuai titik koordinat masing-masing cabang. Klik Lihat Lokasi untuk membuka rute lengkap di Google Maps.
+          <p className="text-sm sm:text-base text-[#3F4A59] leading-relaxed">
+            Pratinjau peta sesuai titik koordinat masing-masing cabang. Klik tombol di bawah peta untuk membuka rute Google Maps.
           </p>
         </div>
 
@@ -378,26 +387,26 @@ export function BranchesSection({ branches }: { branches: BranchLocation[] }) {
           {branches.map((branch) => (
             <article
               key={branch.id}
-              className="ios-glass-strong rounded-3xl p-6 sm:p-7 flex flex-col justify-between gap-5"
+              className="editorial-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between gap-5"
             >
-              <div className="space-y-2 text-center">
-                <div className="inline-flex items-center justify-center gap-1.5 text-xs font-semibold text-emerald-700">
+              <div className="space-y-1.5">
+                <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0F766E]">
                   <MapPin className="w-4 h-4 shrink-0" />
-                  <span>{branch.roleLabel}</span>
+                  <span>{branch.roleLabel} · Kabupaten Indramayu</span>
                 </div>
-                <h3 className="text-lg sm:text-xl font-extrabold text-slate-900 leading-snug">
+                <h3 className="font-display text-2xl font-bold text-[#121820] leading-snug">
                   {branch.name}
                 </h3>
               </div>
 
               <BranchMapPreview branch={branch} />
 
-              <div className="text-center pt-1">
+              <div className="pt-1">
                 <a
                   href={branch.mapsUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center justify-center gap-2 px-6 py-3 min-h-[44px] text-sm font-semibold text-white bg-slate-900 hover:bg-rose-700 rounded-2xl shadow-sm transition-colors whitespace-nowrap"
+                  className="inline-flex items-center justify-center gap-2 px-5 py-3 min-h-[44px] text-sm font-semibold text-white bg-[#121820] hover:bg-[#BE123C] rounded-xl transition-colors whitespace-nowrap"
                 >
                   <span>Lihat Lokasi di Google Maps</span>
                   <ExternalLink className="w-4 h-4" />
@@ -420,23 +429,23 @@ export function ContactSection({ contact }: { contact: SiteContentSection }) {
   const fbUrl = contact.facebookUrl || 'https://www.facebook.com/share/1CSomr9gXK/';
 
   return (
-    <section className="py-14 sm:py-18">
+    <section className="py-14 sm:py-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="ios-glass-strong rounded-3xl p-6 sm:p-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-          <div className="lg:col-span-7 space-y-4 text-center lg:text-left">
-            <p className="text-xs font-semibold tracking-wider text-rose-700 uppercase">
+        <div className="editorial-card rounded-2xl p-6 sm:p-10 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+          <div className="lg:col-span-7 space-y-4">
+            <p className="text-xs font-semibold tracking-[0.14em] text-[#BE123C] uppercase">
               Pendaftaran &amp; Informasi
             </p>
-            <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
+            <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-[#121820]">
               Siap Mendaftarkan Putra-Putri Anda?
             </h2>
-            <p className="text-sm sm:text-base text-slate-600 leading-relaxed max-w-xl mx-auto lg:mx-0">
+            <p className="text-sm sm:text-base text-[#3F4A59] leading-relaxed max-w-xl">
               Orang tua dapat masuk menggunakan akun Google untuk mengisi formulir pendaftaran satu atau beberapa anak sekaligus serta memantau status persetujuan secara langsung.
             </p>
-            <div className="flex flex-wrap items-center justify-center lg:justify-start gap-3 pt-2">
+            <div className="flex flex-wrap items-center gap-3 pt-2">
               <Link
                 to="/daftar"
-                className="inline-flex items-center justify-center gap-2.5 px-6 py-3 min-h-[48px] text-sm font-bold text-white bg-rose-700 hover:bg-rose-800 rounded-2xl shadow-md transition-colors whitespace-nowrap"
+                className="inline-flex items-center justify-center gap-2.5 px-6 py-3 min-h-[48px] text-sm font-semibold text-white bg-[#BE123C] hover:bg-[#9F1239] rounded-xl transition-colors whitespace-nowrap"
               >
                 <span className="w-5 h-5 rounded-full bg-white flex items-center justify-center shrink-0">
                   <GoogleOfficialIcon className="w-3.5 h-3.5" />
@@ -447,7 +456,7 @@ export function ContactSection({ contact }: { contact: SiteContentSection }) {
                 href={waUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-2 px-5 py-3 min-h-[48px] text-sm font-semibold text-emerald-800 bg-emerald-50/85 border border-emerald-200 hover:bg-emerald-100 rounded-2xl transition-colors whitespace-nowrap"
+                className="inline-flex items-center justify-center gap-2 px-5 py-3 min-h-[48px] text-sm font-semibold text-[#0F766E] bg-[#EFECE4] border border-[#DFDCD3] hover:border-[#0F766E] rounded-xl transition-colors whitespace-nowrap"
               >
                 <WhatsAppBrandIcon className="w-4 h-4" />
                 <span>Chat WhatsApp {waDisplay}</span>
@@ -455,15 +464,15 @@ export function ContactSection({ contact }: { contact: SiteContentSection }) {
             </div>
           </div>
 
-          <div className="lg:col-span-5 grid grid-cols-1 gap-3 border-t lg:border-t-0 lg:border-l border-slate-200/70 pt-6 lg:pt-0 lg:pl-8">
+          <div className="lg:col-span-5 grid grid-cols-1 gap-3 border-t lg:border-t-0 lg:border-l border-[#DFDCD3] pt-6 lg:pt-0 lg:pl-8">
             <a
               href={`mailto:${email}`}
-              className="flex items-center gap-3 p-3.5 rounded-2xl ios-glass-subtle hover:bg-white/90 transition-colors"
+              className="flex items-center gap-3 p-3.5 rounded-xl editorial-card-subtle hover:border-[#121820] transition-colors"
             >
-              <Mail className="w-5 h-5 text-slate-700 shrink-0" />
+              <Mail className="w-5 h-5 text-[#121820] shrink-0" />
               <div className="min-w-0">
-                <p className="text-xs font-medium text-slate-500">Email Resmi</p>
-                <p className="text-sm font-semibold text-slate-900 truncate">{email}</p>
+                <p className="text-xs font-medium text-[#626E7E]">Email Resmi</p>
+                <p className="text-sm font-semibold text-[#121820] truncate">{email}</p>
               </div>
             </a>
 
@@ -471,12 +480,12 @@ export function ContactSection({ contact }: { contact: SiteContentSection }) {
               href={waUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-3 p-3.5 rounded-2xl ios-glass-subtle hover:bg-white/90 transition-colors"
+              className="flex items-center gap-3 p-3.5 rounded-xl editorial-card-subtle hover:border-[#0F766E] transition-colors"
             >
               <WhatsAppBrandIcon className="w-5 h-5 text-emerald-600 shrink-0" />
               <div className="min-w-0">
-                <p className="text-xs font-medium text-slate-500">WhatsApp Resmi</p>
-                <p className="text-sm font-semibold text-slate-900">{waDisplay}</p>
+                <p className="text-xs font-medium text-[#626E7E]">WhatsApp Resmi</p>
+                <p className="text-sm font-semibold text-[#121820] font-mono tabular-nums">{waDisplay}</p>
               </div>
             </a>
 
@@ -485,16 +494,16 @@ export function ContactSection({ contact }: { contact: SiteContentSection }) {
                 href={igUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 p-3.5 min-h-[48px] rounded-2xl ios-glass-subtle hover:bg-white/90 text-sm font-semibold text-slate-800 transition-colors"
+                className="flex items-center justify-center gap-2 p-3.5 min-h-[48px] rounded-xl editorial-card-subtle hover:border-[#121820] text-sm font-semibold text-[#121820] transition-colors"
               >
-                <InstagramBrandIcon className="w-4 h-4 text-rose-600 shrink-0" />
+                <InstagramBrandIcon className="w-4 h-4 text-[#BE123C] shrink-0" />
                 <span>Instagram</span>
               </a>
               <a
                 href={fbUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 p-3.5 min-h-[48px] rounded-2xl ios-glass-subtle hover:bg-white/90 text-sm font-semibold text-slate-800 transition-colors"
+                className="flex items-center justify-center gap-2 p-3.5 min-h-[48px] rounded-xl editorial-card-subtle hover:border-[#121820] text-sm font-semibold text-[#121820] transition-colors"
               >
                 <FacebookBrandIcon className="w-4 h-4 text-blue-600 shrink-0" />
                 <span>Facebook</span>

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 
 import {
   ADMIN_WHATSAPP_TARGET,
+  FONNTE_SENDER_NUMBER,
   buildPaymentDueNotificationMessage,
   buildRegistrationNotificationMessage,
   computeNextMonthlyDueDate,
@@ -13,6 +14,7 @@ import {
   normalizeWhatsappPhone,
   type PaymentStatus,
 } from './src/lib/domain';
+import { renderTemplateVariables } from './src/lib/quizAndWaDomain';
 import {
   generateRobotsTxt,
   generateSitemapXml,
@@ -31,6 +33,35 @@ import {
   sendFonnteWhatsApp,
   upsertDueReminder,
 } from './src/server/fonnte';
+import {
+  deleteAdminQuiz,
+  exportAdminQuizCsv,
+  getAdminQuizAttempts,
+  getPublicQuizById,
+  listAdminQuizzes,
+  listPublicQuizzes,
+  startStudentQuizSession,
+  submitStudentQuizAttempt,
+  upsertAdminQuiz,
+} from './src/server/quizService';
+import {
+  addWaOptOut,
+  createWaCampaign,
+  deleteWaTemplate,
+  exportWaCampaignCsv,
+  getWaCenterOverviewStatus,
+  getWaSettings,
+  listSavedWaGroups,
+  listWaTemplates,
+  processWaCampaignBatch,
+  refreshWaGroupsFromFonnte,
+  removeWaOptOut,
+  saveWaSettings,
+  sendWaGroupAnnouncement,
+  setWaCampaignStatus,
+  updatePinnedWaGroups,
+  upsertWaTemplate,
+} from './src/server/waCenterService';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -91,6 +122,7 @@ export function createApp() {
       email: decoded.email,
       emailVerified: Boolean(decoded.email_verified),
       fonnteConfigured: isFonnteConfigured(),
+      fonnteSenderNumber: FONNTE_SENDER_NUMBER,
       whatsappTarget: ADMIN_WHATSAPP_TARGET,
     });
   });
@@ -429,22 +461,422 @@ export function createApp() {
     }
 
     const baseUrl = resolveBaseUrl(req);
+    const body = (req.body || {}) as { target?: string };
+    const customTarget = typeof body.target === 'string' && body.target.trim()
+      ? (body.target.trim().endsWith('@g.us') ? body.target.trim() : normalizeWhatsappPhone(body.target.trim()))
+      : ADMIN_WHATSAPP_TARGET;
     const nowLabel = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
     const message = [
       '✅ UJI NOTIFIKASI WHATSAPP — TOMOYO EDUCATION',
       '',
       `Pengirim Admin: ${decoded.email}`,
+      `Nomor Device Fonnte: +${FONNTE_SENDER_NUMBER}`,
       `Waktu Uji: ${nowLabel} WIB`,
       `Dashboard Admin: ${baseUrl}/admintomoyo`,
       '',
-      'Integrasi backend Fonnte aktif dan siap menerima notifikasi pendaftaran siswa baru maupun pengingat pembayaran jatuh tempo.',
+      'Integrasi backend Fonnte aktif dan siap menerima notifikasi pendaftaran siswa baru, kuis online, maupun siaran pesan.',
     ].join('\n');
 
-    const delivery = await sendFonnteWhatsApp({ message });
+    const delivery = await sendFonnteWhatsApp({ target: customTarget, message });
     res.json({
       ...delivery,
       messagePreview: message.slice(0, 480),
     });
+  });
+
+  // ============================================================================
+  // PUBLIC ONLINE QUIZ ROUTES (NO LOGIN REQUIRED — KEYS NEVER EXPOSED)
+  // ============================================================================
+
+  app.get('/api/quizzes', (_req, res) => {
+    res.json({ quizzes: listPublicQuizzes() });
+  });
+
+  app.get('/api/quizzes/:quizId', (req, res) => {
+    const data = getPublicQuizById(req.params.quizId);
+    if (!data.quiz) {
+      res.status(404).json({ error: 'Kuis tidak ditemukan atau belum diterbitkan.' });
+      return;
+    }
+    res.json(data);
+  });
+
+  app.post('/api/quizzes/:quizId/start', (req, res) => {
+    const body = (req.body || {}) as {
+      studentName?: string;
+      studentClass?: string;
+      parentWhatsapp?: string;
+    };
+    const started = startStudentQuizSession({
+      quizId: req.params.quizId,
+      studentName: typeof body.studentName === 'string' ? body.studentName : '',
+      studentClass: typeof body.studentClass === 'string' ? body.studentClass : '',
+      parentWhatsapp: typeof body.parentWhatsapp === 'string' ? body.parentWhatsapp : undefined,
+    });
+    if (!started.ok) {
+      res.status(400).json({ error: started.error || 'Gagal memulai kuis.' });
+      return;
+    }
+    res.json(started);
+  });
+
+  app.post('/api/quizzes/:quizId/submit', (req, res) => {
+    const body = (req.body || {}) as {
+      sessionToken?: string;
+      studentName?: string;
+      studentClass?: string;
+      parentWhatsapp?: string;
+      answers?: Record<string, string>;
+    };
+    const outcome = submitStudentQuizAttempt({
+      quizId: req.params.quizId,
+      sessionToken: body.sessionToken,
+      studentName: typeof body.studentName === 'string' ? body.studentName : '',
+      studentClass: typeof body.studentClass === 'string' ? body.studentClass : '',
+      parentWhatsapp: typeof body.parentWhatsapp === 'string' ? body.parentWhatsapp : undefined,
+      answers: body.answers && typeof body.answers === 'object' ? body.answers : {},
+    });
+    if (!outcome.ok) {
+      res.status(400).json({ error: outcome.error || 'Gagal mengirim jawaban kuis.' });
+      return;
+    }
+    res.json(outcome);
+  });
+
+  // ============================================================================
+  // ADMIN QUIZ MANAGEMENT ROUTES
+  // ============================================================================
+
+  app.get('/api/admin/quizzes', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    res.json({ quizzes: listAdminQuizzes() });
+  });
+
+  app.post('/api/admin/quizzes', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const saved = upsertAdminQuiz(req.body || {});
+    if (!saved.ok || !saved.quiz) {
+      res.status(400).json({
+        error: saved.errors?.join(' ') || 'Data kuis tidak valid.',
+        errors: saved.errors,
+      });
+      return;
+    }
+
+    // Optional automatic notification if turned ON and quiz just published with a notification target
+    const settings = getWaSettings();
+    let autoDispatch: unknown = null;
+    if (
+      settings.autoNotifyQuizPublished &&
+      saved.quiz.status === 'published' &&
+      req.body?.notifyTarget
+    ) {
+      const templates = listWaTemplates();
+      const tpl = templates.find((t) => t.id === settings.autoQuizTemplateId);
+      const baseUrl = resolveBaseUrl(req);
+      const rawMsg =
+        tpl?.content ||
+        `Kuis Online baru tersedia: *${saved.quiz.title}* (${saved.quiz.targetClass}). Kerjakan di ${baseUrl}/kuis/${saved.quiz.id}`;
+      const rendered = renderTemplateVariables(rawMsg, {
+        nama_siswa: 'Siswa-siswi TOMOYO',
+        nama_orang_tua: 'Bapak/Ibu',
+        kelas: saved.quiz.targetClass,
+        nama_program: saved.quiz.title,
+        jadwal: `${baseUrl}/kuis/${saved.quiz.id}`,
+      });
+      const targetStr = String(req.body.notifyTarget).trim();
+      const target = targetStr.endsWith('@g.us') ? targetStr : normalizeWhatsappPhone(targetStr);
+      if (target) {
+        autoDispatch = await sendFonnteWhatsApp({
+          target,
+          message: rendered.rendered,
+        });
+      }
+    }
+
+    res.json({ ok: true, quiz: saved.quiz, autoDispatch });
+  });
+
+  app.delete('/api/admin/quizzes/:quizId', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const deleted = deleteAdminQuiz(req.params.quizId);
+    if (!deleted) {
+      res.status(404).json({ error: 'Kuis tidak ditemukan.' });
+      return;
+    }
+    res.json({ ok: true });
+  });
+
+  app.get('/api/admin/quizzes/:quizId/attempts', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const data = getAdminQuizAttempts(req.params.quizId);
+    if (!data.quiz) {
+      res.status(404).json({ error: 'Kuis tidak ditemukan.' });
+      return;
+    }
+    res.json(data);
+  });
+
+  app.get('/api/admin/quizzes/:quizId/export', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const exported = exportAdminQuizCsv(req.params.quizId);
+    if (!exported.ok || !exported.csv) {
+      res.status(404).json({ error: 'Kuis tidak ditemukan.' });
+      return;
+    }
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
+    res.send(exported.csv);
+  });
+
+  // ============================================================================
+  // ADMIN WHATSAPP GROUP ROUTES (FONNTE)
+  // ============================================================================
+
+  app.get('/api/admin/wa-groups', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    res.json({
+      fonnteConfigured: isFonnteConfigured(),
+      senderNumber: FONNTE_SENDER_NUMBER,
+      ...listSavedWaGroups(),
+    });
+  });
+
+  app.post('/api/admin/wa-groups/sync', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const triggerFetchGroup = Boolean(req.body?.triggerFetchGroup);
+    const result = await refreshWaGroupsFromFonnte(triggerFetchGroup);
+    res.json(result);
+  });
+
+  app.post('/api/admin/wa-groups/pinned', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const pinnedIds = Array.isArray(req.body?.pinnedIds)
+      ? req.body.pinnedIds.map((id: unknown) => String(id))
+      : [];
+    const groups = updatePinnedWaGroups(pinnedIds);
+    res.json({ ok: true, groups });
+  });
+
+  app.post('/api/admin/wa-groups/send', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const body = (req.body || {}) as {
+      groupIds?: string[];
+      message?: string;
+      requestId?: string;
+    };
+    const result = await sendWaGroupAnnouncement({
+      groupIds: Array.isArray(body.groupIds) ? body.groupIds : [],
+      message: typeof body.message === 'string' ? body.message : '',
+      sentByEmail: decoded.email || 'admin',
+      requestId: typeof body.requestId === 'string' ? body.requestId : undefined,
+    });
+    if (!result.ok) {
+      res.status(400).json({ error: result.error || 'Gagal mengirim pesan grup.' });
+      return;
+    }
+    res.json(result);
+  });
+
+  // ============================================================================
+  // ADMIN WHATSAPP CENTER ROUTES (TEMPLATES, CAMPAIGNS, QUEUE, SETTINGS)
+  // ============================================================================
+
+  app.get('/api/admin/wa-center/overview', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const overview = await getWaCenterOverviewStatus();
+    res.json({
+      senderNumber: FONNTE_SENDER_NUMBER,
+      adminTarget: ADMIN_WHATSAPP_TARGET,
+      ...overview,
+    });
+  });
+
+  app.post('/api/admin/wa-center/templates', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const result = upsertWaTemplate({
+      id: typeof req.body?.id === 'string' ? req.body.id : undefined,
+      name: typeof req.body?.name === 'string' ? req.body.name : '',
+      category: typeof req.body?.category === 'string' ? req.body.category : '',
+      content: typeof req.body?.content === 'string' ? req.body.content : '',
+      isEnabled: typeof req.body?.isEnabled === 'boolean' ? req.body.isEnabled : undefined,
+    });
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    res.json({ ok: true, template: result.template, templates: listWaTemplates() });
+  });
+
+  app.delete('/api/admin/wa-center/templates/:id', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const deleted = deleteWaTemplate(req.params.id);
+    if (!deleted) {
+      res.status(404).json({ error: 'Template tidak ditemukan.' });
+      return;
+    }
+    res.json({ ok: true, templates: listWaTemplates() });
+  });
+
+  app.post('/api/admin/wa-center/optouts', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const phone = typeof req.body?.phone === 'string' ? req.body.phone : '';
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason : undefined;
+    if (!phone.trim()) {
+      res.status(400).json({ error: 'Nomor WhatsApp opt-out wajib diisi.' });
+      return;
+    }
+    const optOuts = addWaOptOut(phone, reason);
+    res.json({ ok: true, optOuts });
+  });
+
+  app.delete('/api/admin/wa-center/optouts/:phone', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const optOuts = removeWaOptOut(req.params.phone);
+    res.json({ ok: true, optOuts });
+  });
+
+  app.post('/api/admin/wa-center/settings', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const settings = saveWaSettings(req.body || {});
+    res.json({ ok: true, settings });
+  });
+
+  app.post('/api/admin/wa-center/campaigns', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const body = req.body || {};
+    const created = createWaCampaign({
+      title: typeof body.title === 'string' ? body.title : '',
+      templateId: typeof body.templateId === 'string' ? body.templateId : undefined,
+      templateName: typeof body.templateName === 'string' ? body.templateName : undefined,
+      rawMessage: typeof body.rawMessage === 'string' ? body.rawMessage : '',
+      recipients: Array.isArray(body.recipients) ? body.recipients : [],
+      delaySeconds: typeof body.delaySeconds === 'number' ? body.delaySeconds : undefined,
+      batchSize: typeof body.batchSize === 'number' ? body.batchSize : undefined,
+      maxRetries: typeof body.maxRetries === 'number' ? body.maxRetries : undefined,
+      createdByEmail: decoded.email || 'admin',
+      fallbackVariables:
+        body.fallbackVariables && typeof body.fallbackVariables === 'object'
+          ? body.fallbackVariables
+          : undefined,
+    });
+    if (!created.ok) {
+      res.status(400).json({
+        error: created.error,
+        missingVariableErrors: created.missingVariableErrors,
+      });
+      return;
+    }
+    res.json(created);
+  });
+
+  app.post('/api/admin/wa-center/campaigns/:id/process-batch', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const result = await processWaCampaignBatch(req.params.id);
+    if (!result.ok) {
+      res.status(404).json({ error: result.error });
+      return;
+    }
+    res.json(result);
+  });
+
+  app.post('/api/admin/wa-center/campaigns/:id/status', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const status = req.body?.status === 'paused' ? 'paused' : 'running';
+    const updated = setWaCampaignStatus(req.params.id, status);
+    if (!updated) {
+      res.status(404).json({ error: 'Kampanye tidak ditemukan.' });
+      return;
+    }
+    res.json({ ok: true, campaign: updated });
+  });
+
+  app.get('/api/admin/wa-center/campaigns/:id/export', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const exported = exportWaCampaignCsv(req.params.id);
+    if (!exported.ok || !exported.csv) {
+      res.status(404).json({ error: 'Kampanye tidak ditemukan.' });
+      return;
+    }
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
+    res.send(exported.csv);
   });
 
   return app;
