@@ -37,6 +37,7 @@ import {
   PackageId,
   PaymentRecord,
   PaymentStatus,
+  REGISTRATION_WHATSAPP_TARGET,
   RegistrationStatus,
   ScheduleItem,
   SiteContentSection,
@@ -425,7 +426,7 @@ export async function submitMultiChildRegistration(params: {
         registrationId: res.registrationId.slice(0, 128),
         parentId: params.uid,
         type: 'registration' satisfies NotificationType,
-        target: (res.target || ADMIN_WHATSAPP_TARGET).slice(0, 30),
+        target: (res.target || REGISTRATION_WHATSAPP_TARGET).slice(0, 30),
         status: res.status,
         messagePreview: (res.messagePreview || 'Notifikasi pendaftaran siswa baru').slice(0, 500),
         providerDetail: res.detail.slice(0, 400),
@@ -685,7 +686,7 @@ export async function adminCreateOfflineStudent(params: {
   let waStatus: WaDeliveryStatus = 'unconfigured';
   let waDetail = 'Menunggu status pengiriman WhatsApp.';
   let messagePreview = 'Notifikasi pendaftaran offline admin';
-  let target = ADMIN_WHATSAPP_TARGET;
+  let target = REGISTRATION_WHATSAPP_TARGET;
 
   try {
     const resp = await fetch('/api/admin/notify/offline-registration', {
@@ -987,7 +988,7 @@ export async function adminCreateMigratedStudent(params: {
           registrationId: studentRef.id,
           parentId: 'legacy_archive',
           type: 'offline_registration',
-          target: json.target || ADMIN_WHATSAPP_TARGET,
+          target: json.target || REGISTRATION_WHATSAPP_TARGET,
           status: waStatus,
           messagePreview: json.messagePreview || `Pindah data arsip ${draft.childName}`,
           providerDetail: json.detail || '',

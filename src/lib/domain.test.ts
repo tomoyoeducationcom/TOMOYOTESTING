@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import {
   ADMIN_EMAIL,
   ADMIN_UID,
+  ADMIN_WHATSAPP_TARGET,
   INITIAL_BRANCHES,
   INITIAL_PACKAGES,
   INITIAL_TEACHERS,
   LearningPackage,
+  REGISTRATION_WHATSAPP_TARGET,
   StudentRecord,
   buildPaymentDueNotificationMessage,
   buildRegistrationNotificationMessage,
@@ -493,5 +495,11 @@ test('legacy student archive migration validation, metadata round-trip, Indonesi
   });
   assert.equal(bySchoolSearch.filtered.length, 1);
   assert.equal(bySchoolSearch.filtered[0].id, 's2');
+});
+
+test('REGISTRATION_WHATSAPP_TARGET directs new registrations to 083121902760 (6283121902760)', () => {
+  assert.equal(REGISTRATION_WHATSAPP_TARGET, '6283121902760');
+  assert.equal(normalizeWhatsappPhone('083121902760'), REGISTRATION_WHATSAPP_TARGET);
+  assert.equal(ADMIN_WHATSAPP_TARGET, '6281996284733');
 });
 

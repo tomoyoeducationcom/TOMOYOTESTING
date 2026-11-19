@@ -88,8 +88,8 @@ export function AdminAiPanel({ user }: { user: User }) {
   const [banner, setBanner] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   // Overview / Server Config State
-  const [openaiConfigured, setOpenaiConfigured] = useState(false);
-  const [activeModel, setActiveModel] = useState('gpt-4o-mini');
+  const [groqConfigured, setGroqConfigured] = useState(false);
+  const [activeModel, setActiveModel] = useState('openai/gpt-oss-20b');
   const [supportedModels, setSupportedModels] = useState<AiModelPricing[]>(SUPPORTED_AI_MODELS);
   const [limits, setLimits] = useState<LimitsSummary>({
     dailyRequestLimit: 500,
@@ -174,15 +174,15 @@ export function AdminAiPanel({ user }: { user: User }) {
 
       if (ovRes.ok) {
         const ov = (await ovRes.json()) as {
-          openaiConfigured: boolean;
+          groqConfigured?: boolean;
           activeModel: string;
           supportedModels: AiModelPricing[];
           settings: AiChatbotSettings;
           instructions: AiInstructionConfig;
           limits: LimitsSummary;
         };
-        setOpenaiConfigured(Boolean(ov.openaiConfigured));
-        setActiveModel(ov.activeModel || 'gpt-4o-mini');
+        setGroqConfigured(Boolean(ov.groqConfigured));
+        setActiveModel(ov.activeModel || 'openai/gpt-oss-20b');
         if (Array.isArray(ov.supportedModels) && ov.supportedModels.length > 0) {
           setSupportedModels(ov.supportedModels);
         }
@@ -561,19 +561,19 @@ export function AdminAiPanel({ user }: { user: User }) {
             <div className="bg-white border border-[#E5E2D9] rounded-xl p-5 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-wider text-[#646F7E]">
-                  Status Koneksi OpenAI
+                  Status Koneksi Groq AI
                 </span>
-                {openaiConfigured ? (
+                {groqConfigured ? (
                   <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                 ) : (
                   <XCircle className="w-4 h-4 text-rose-600" />
                 )}
               </div>
               <p className="text-base font-bold text-[#141A23]">
-                {openaiConfigured ? 'Terkonfigurasi (Server-Side)' : 'Belum Terkonfigurasi'}
+                {groqConfigured ? 'Terkonfigurasi (Server-Side)' : 'Belum Terkonfigurasi'}
               </p>
               <p className="text-xs text-[#646F7E]">
-                API key dibaca aman melalui environment server (<code>OPENAI_API_KEY</code>) dan tidak pernah dikirim ke browser.
+                API key dibaca aman melalui environment server (<code>GROQ_API_KEY</code>) dan tidak pernah dikirim ke browser.
               </p>
             </div>
 
@@ -719,14 +719,14 @@ export function AdminAiPanel({ user }: { user: User }) {
                       <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
                       {m.errorDetail && (
                         <p className="mt-1.5 text-[11px] font-mono text-rose-700 bg-rose-50 border border-rose-200 rounded px-2 py-1">
-                          Detail OpenAI: {m.errorDetail}
+                          Detail Groq: {m.errorDetail}
                         </p>
                       )}
                     </div>
                   ))}
                   {testSending && (
                     <p className="text-xs text-[#646F7E] italic">
-                      Memproses permintaan melalui OpenAI &amp; tool Firebase...
+                      Memproses permintaan melalui Groq AI &amp; tool Firebase...
                     </p>
                   )}
                 </div>
@@ -1340,7 +1340,7 @@ export function AdminAiPanel({ user }: { user: User }) {
               </div>
               <div>
                 <label className="block text-xs font-semibold text-[#3E4856] mb-1">
-                  Model OpenAI Aktif
+                  Model Groq Aktif
                 </label>
                 <select
                   value={settings.model}
@@ -1539,7 +1539,7 @@ export function AdminAiPanel({ user }: { user: User }) {
           <div className="bg-white border border-[#E5E2D9] rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-bold text-[#141A23]">
-                Statistik Penggunaan &amp; Estimasi Biaya OpenAI
+                Statistik Penggunaan &amp; Estimasi Biaya Groq AI
               </h2>
               <p className="text-xs text-[#646F7E]">
                 Hanya mencatat metrik token, jumlah permintaan, dan perkiraan biaya — tanpa menyimpan transkrip percakapan pengunjung.

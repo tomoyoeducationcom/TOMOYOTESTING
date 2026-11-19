@@ -3,6 +3,7 @@ export const ADMIN_EMAIL = 'tomoyoeducation.com@gmail.com';
 export const ADMIN_WHATSAPP_TARGET = '6281996284733';
 export const FONNTE_SENDER_NUMBER = '6283121902760';
 export const FONNTE_SENDER_DISPLAY = '+62 831-2190-2760';
+export const REGISTRATION_WHATSAPP_TARGET = FONNTE_SENDER_NUMBER;
 
 export const BRAND_IDENTITY = {
   officialName: 'TOMOYO PRIVAT & BIMBEL EDUCATION',

@@ -153,8 +153,34 @@ function FormattedAssistantText({ content }: { content: string }) {
 
   for (const rawLine of lines) {
     const trimmed = rawLine.trim();
-    const bulletMatch = trimmed.match(/^[-*•]\s+(.+)$/);
-    const orderedMatch = trimmed.match(/^\d+\.\s+(.+)$/);
+    const compact = trimmed.replace(/\s+/g, '');
+    if (compact.includes('|') && /^\|?[:\-|]+\|?$/.test(compact) && compact.includes('-')) {
+      // Skip Markdown table separator rows (e.g. | --- | --- |)
+      continue;
+    }
+    const normalizedLine =
+      trimmed.startsWith('|') && trimmed.endsWith('|')
+        ? trimmed
+            .slice(1, -1)
+            .split('|')
+            .map((cell) => cell.trim())
+            .filter(Boolean)
+            .join(' · ')
+        : trimmed;
+
+    const headingMatch = normalizedLine.match(/^#{1,4}\s+(.+)$/);
+    const bulletMatch = normalizedLine.match(/^[-*•]\s+(.+)$/);
+    const orderedMatch = normalizedLine.match(/^\d+\.\s+(.+)$/);
+
+    if (headingMatch) {
+      flushList();
+      blocks.push(
+        <p key={`h_${blockKey++}`} className="text-[13.5px] font-bold text-[#141A23] leading-snug pt-0.5">
+          {renderInlineSegments(headingMatch[1])}
+        </p>
+      );
+      continue;
+    }
 
     if (bulletMatch) {
       if (listItems.length > 0 && listItems[0].ordered) flushList();
@@ -169,12 +195,12 @@ function FormattedAssistantText({ content }: { content: string }) {
 
     flushList();
 
-    if (!trimmed) {
+    if (!normalizedLine) {
       blocks.push(<div key={`sp_${blockKey++}`} className="h-1.5" />);
     } else {
       blocks.push(
         <p key={`p_${blockKey++}`} className="text-[13.5px] leading-relaxed">
-          {renderInlineSegments(trimmed)}
+          {renderInlineSegments(normalizedLine)}
         </p>
       );
     }
@@ -650,7 +676,7 @@ export function TomoyoAssistantWidget() {
 
             <div className="flex items-center justify-between gap-2 text-[11px] text-[#646F7E]">
               <span className="truncate">
-                Sesi sementara · Diproses via OpenAI API
+                Sesi sementara · Diproses via Groq AI
               </span>
               <a
                 href={settings.adminWhatsappUrl}

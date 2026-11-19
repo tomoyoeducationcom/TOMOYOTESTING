@@ -1,5 +1,68 @@
 [
   {
+    "id": "grplog_quiz_1795099615934_cf46",
+    "groupIds": [
+      "1203630999999@g.us"
+    ],
+    "groupNames": [
+      "1203630999999@g.us"
+    ],
+    "message": "*KUIS ONLINE — TOMOYO EDUCATION*\n\nJudul Kuis: *Kuis IPA*\nTarget Kelas: Kelas 4 SD\nDetail: 5 Soal · 10 Menit\n\nSilakan kerjakan langsung melalui tautan resmi berikut:\nhttps://tomoyotesting.vercel.app/kuis/kuis-test-wa\n\nIsi nama lengkap dan kelas sebelum mulai mengerjakan. Semangat belajar!",
+    "status": "unconfigured",
+    "results": [
+      {
+        "groupId": "1203630999999@g.us",
+        "groupName": "1203630999999@g.us",
+        "status": "unconfigured",
+        "detail": "FONNTE_TOKEN belum dikonfigurasi di environment backend."
+      }
+    ],
+    "sentAtIso": "2026-11-19T14:46:55.934Z",
+    "sentByEmail": "tomoyoeducation.com@gmail.com"
+  },
+  {
+    "id": "grplog_quiz_1795099420055_732c",
+    "groupIds": [
+      "1203630999999@g.us"
+    ],
+    "groupNames": [
+      "1203630999999@g.us"
+    ],
+    "message": "*KUIS ONLINE — TOMOYO EDUCATION*\n\nJudul Kuis: *Kuis IPA*\nTarget Kelas: Kelas 4 SD\nDetail: 5 Soal · 10 Menit\n\nSilakan kerjakan langsung melalui tautan resmi berikut:\nhttps://tomoyotesting.vercel.app/kuis/kuis-test-wa\n\nIsi nama lengkap dan kelas sebelum mulai mengerjakan. Semangat belajar!",
+    "status": "unconfigured",
+    "results": [
+      {
+        "groupId": "1203630999999@g.us",
+        "groupName": "1203630999999@g.us",
+        "status": "unconfigured",
+        "detail": "FONNTE_TOKEN belum dikonfigurasi di environment backend."
+      }
+    ],
+    "sentAtIso": "2026-11-19T14:43:40.055Z",
+    "sentByEmail": "tomoyoeducation.com@gmail.com"
+  },
+  {
+    "id": "grplog_quiz_1795099402526_9d0c",
+    "groupIds": [
+      "1203630999999@g.us"
+    ],
+    "groupNames": [
+      "1203630999999@g.us"
+    ],
+    "message": "*KUIS ONLINE — TOMOYO EDUCATION*\n\nJudul Kuis: *Kuis IPA*\nTarget Kelas: Kelas 4 SD\nDetail: 5 Soal · 10 Menit\n\nSilakan kerjakan langsung melalui tautan resmi berikut:\nhttps://tomoyotesting.vercel.app/kuis/kuis-test-wa\n\nIsi nama lengkap dan kelas sebelum mulai mengerjakan. Semangat belajar!",
+    "status": "unconfigured",
+    "results": [
+      {
+        "groupId": "1203630999999@g.us",
+        "groupName": "1203630999999@g.us",
+        "status": "unconfigured",
+        "detail": "FONNTE_TOKEN belum dikonfigurasi di environment backend."
+      }
+    ],
+    "sentAtIso": "2026-11-19T14:43:22.526Z",
+    "sentByEmail": "tomoyoeducation.com@gmail.com"
+  },
+  {
     "id": "grplog_quiz_1795095872254_ac7c",
     "groupIds": [
       "1203630999999@g.us"

@@ -48,6 +48,7 @@ import {
   PackageId,
   PaymentRecord,
   PaymentStatus,
+  REGISTRATION_WHATSAPP_TARGET,
   RegistrationChannel,
   RegistrationStatus,
   StudentRecord,
@@ -3233,9 +3234,12 @@ export function AdminDashboardPage() {
                       <p className="text-[11px] text-[#5E6774] mt-0.5">083121902760</p>
                     </div>
                     <div className="p-4 rounded-xl ios-glass-subtle">
-                      <p className="text-xs text-[#5E6774]">Nomor Penerima Notifikasi Admin</p>
+                      <p className="text-xs text-[#5E6774]">Target Notifikasi Pendaftar Baru</p>
                       <p className="font-mono font-bold text-[#141A23] mt-1">
-                        {ADMIN_WHATSAPP_TARGET}
+                        {REGISTRATION_WHATSAPP_TARGET}
+                      </p>
+                      <p className="text-[11px] text-[#5E6774] mt-0.5">
+                        083121902760 (otomatis pendaftar baru) · Uji admin: {ADMIN_WHATSAPP_TARGET}
                       </p>
                     </div>
                     <div className="p-4 rounded-xl ios-glass-subtle">

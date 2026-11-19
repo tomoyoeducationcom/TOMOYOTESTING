@@ -1,15 +1,15 @@
 {
   "2026-11-19": {
     "dateKey": "2026-11-19",
-    "totalRequests": 3,
-    "publicRequests": 2,
-    "adminRequests": 1,
+    "totalRequests": 10,
+    "publicRequests": 8,
+    "adminRequests": 2,
     "failedRequests": 3,
-    "inputTokens": 0,
-    "outputTokens": 0,
-    "estimatedCostUsd": 0,
-    "sessionCount": 3,
-    "model": "gpt-4o-mini",
-    "updatedAtIso": "2026-11-19T13:39:14.541Z"
+    "inputTokens": 14388,
+    "outputTokens": 1061,
+    "estimatedCostUsd": 0.001397,
+    "sessionCount": 9,
+    "model": "openai/gpt-oss-20b",
+    "updatedAtIso": "2026-11-19T14:46:52.481Z"
   }
 }

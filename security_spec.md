@@ -25,7 +25,7 @@
 11. **Quiz Answer Key Leakage**: Unauthenticated student or authenticated parent attempts `get` or `list` on `/quizKeys/{quizId}`, `get`/`list`/`delete` on `/quizAttempts/{attemptId}`, or `create` on `/quizAttempts/{attemptId}` referencing a draft/non-existent quiz. -> Expected: `PERMISSION_DENIED`.
 12. **WhatsApp Center Tampering**: Non-admin user attempts to read `/waCampaigns/{id}`, `/waTemplates/{id}`, `/waSettings/{id}`, or `/waOptOuts/{id}`. -> Expected: `PERMISSION_DENIED`.
 13. **AI Knowledge & Instructions Isolation**: Non-admin user attempts to read inactive `/aiKnowledge/{id}` (`isActive == false`), write to `/aiKnowledge/{id}`, read/write `/aiInstructions/{docId}`, write `/aiSettings/{docId}`, or read/write `/aiUsageDaily/{dateKey}`. -> Expected: `PERMISSION_DENIED`.
-14. **AI API Key & Transcript Protection**: `/aiSettings`, `/aiInstructions`, `/aiKnowledge`, and `/aiUsageDaily` strictly prohibit shadow fields (e.g., `apiKey`, `openAiKey`, `transcript`, `messages`) via `keys().hasOnly(...)`.
+14. **AI API Key & Transcript Protection**: `/aiSettings`, `/aiInstructions`, `/aiKnowledge`, and `/aiUsageDaily` strictly prohibit shadow fields (e.g., `apiKey`, `groqApiKey`, `openAiKey`, `transcript`, `messages`) via `keys().hasOnly(...)`.
 
 ## 3. TOMOYO ASISTEN Data Invariants
 10. **AI Knowledge Center (`/aiKnowledge/{itemId}`)**: Active items (`isActive == true`) are publicly readable for grounding; inactive items and all mutations (`create`, `update`, `delete`) are strictly Admin-only.

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import {
   ADMIN_WHATSAPP_TARGET,
   FONNTE_SENDER_NUMBER,
+  REGISTRATION_WHATSAPP_TARGET,
   buildPaymentDueNotificationMessage,
   buildRegistrationNotificationMessage,
   computeNextMonthlyDueDate,
@@ -143,6 +144,7 @@ export function createApp() {
       emailVerified: Boolean(decoded.email_verified),
       fonnteConfigured: isFonnteConfigured(),
       fonnteSenderNumber: FONNTE_SENDER_NUMBER,
+      registrationTarget: REGISTRATION_WHATSAPP_TARGET,
       whatsappTarget: ADMIN_WHATSAPP_TARGET,
     });
   });
@@ -194,7 +196,7 @@ export function createApp() {
         results.push({
           registrationId: registrationId || 'unknown',
           status: 'failed' as const,
-          target: ADMIN_WHATSAPP_TARGET,
+          target: REGISTRATION_WHATSAPP_TARGET,
           detail: 'Payload anak tidak lengkap.',
           messagePreview: '',
         });
@@ -233,6 +235,7 @@ export function createApp() {
       });
 
       const delivery = await sendFonnteWhatsApp({
+        target: REGISTRATION_WHATSAPP_TARGET,
         message,
         idempotencyKey: `reg_${decoded.uid}_${registrationId}`,
       });
@@ -324,6 +327,7 @@ export function createApp() {
     });
 
     const delivery = await sendFonnteWhatsApp({
+      target: REGISTRATION_WHATSAPP_TARGET,
       message,
       idempotencyKey: `offline_reg_${registrationId}`,
     });

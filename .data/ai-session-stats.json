@@ -1,5 +1,71 @@
 [
   {
+    "sessionIdHash": "20247e25bd0c",
+    "mode": "public",
+    "startedAtIso": "2026-11-19T14:46:52.481Z",
+    "lastActiveAtIso": "2026-11-19T14:46:52.481Z",
+    "turnCount": 1,
+    "inputTokens": 1156,
+    "outputTokens": 50,
+    "estimatedCostUsd": 0.000102,
+    "failedCount": 0
+  },
+  {
+    "sessionIdHash": "8ac5ec7d61d6",
+    "mode": "public",
+    "startedAtIso": "2026-11-19T14:46:42.683Z",
+    "lastActiveAtIso": "2026-11-19T14:46:42.683Z",
+    "turnCount": 1,
+    "inputTokens": 1156,
+    "outputTokens": 47,
+    "estimatedCostUsd": 0.000101,
+    "failedCount": 0
+  },
+  {
+    "sessionIdHash": "47de4118653d",
+    "mode": "public",
+    "startedAtIso": "2026-11-19T14:46:04.751Z",
+    "lastActiveAtIso": "2026-11-19T14:46:04.751Z",
+    "turnCount": 1,
+    "inputTokens": 2412,
+    "outputTokens": 188,
+    "estimatedCostUsd": 0.000237,
+    "failedCount": 0
+  },
+  {
+    "sessionIdHash": "2d08d9178928",
+    "mode": "public",
+    "startedAtIso": "2026-11-19T14:44:58.211Z",
+    "lastActiveAtIso": "2026-11-19T14:44:58.211Z",
+    "turnCount": 1,
+    "inputTokens": 2412,
+    "outputTokens": 157,
+    "estimatedCostUsd": 0.000228,
+    "failedCount": 0
+  },
+  {
+    "sessionIdHash": "b279cc230ef1",
+    "mode": "admin",
+    "startedAtIso": "2026-11-19T14:44:12.114Z",
+    "lastActiveAtIso": "2026-11-19T14:44:12.114Z",
+    "turnCount": 1,
+    "inputTokens": 1484,
+    "outputTokens": 67,
+    "estimatedCostUsd": 0.000131,
+    "failedCount": 0
+  },
+  {
+    "sessionIdHash": "553c77bbb2c0",
+    "mode": "public",
+    "startedAtIso": "2026-11-19T14:44:09.471Z",
+    "lastActiveAtIso": "2026-11-19T14:44:10.305Z",
+    "turnCount": 2,
+    "inputTokens": 5768,
+    "outputTokens": 552,
+    "estimatedCostUsd": 0.000598,
+    "failedCount": 0
+  },
+  {
     "sessionIdHash": "94ef1f0bad75",
     "mode": "admin",
     "startedAtIso": "2026-11-19T13:39:14.541Z",

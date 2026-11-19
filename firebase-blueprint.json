@@ -412,7 +412,7 @@
     },
     "AiUsageDaily": {
       "title": "AiUsageDaily",
-      "description": "Admin-only aggregate daily OpenAI API usage metrics (zero visitor transcripts stored).",
+      "description": "Admin-only aggregate daily Groq AI API usage metrics (zero visitor transcripts stored).",
       "type": "object",
       "properties": {
         "dateKey": { "type": "string", "minLength": 10, "maxLength": 10 },

@@ -29,6 +29,9 @@ export const INITIAL_AI_KNOWLEDGE_CATEGORIES: string[] = [
   'Informasi Tambahan',
 ];
 
+export const GROQ_API_BASE_URL = 'https://api.groq.com/openai/v1';
+export const DEFAULT_AI_MODEL = 'openai/gpt-oss-20b';
+
 export interface AiModelPricing {
   id: string;
   label: string;
@@ -38,32 +41,33 @@ export interface AiModelPricing {
 }
 
 /**
- * Official OpenAI API per-1M-token rates (USD) for supported economical models.
- * Pricing reference: OpenAI API Pricing (Standard tier).
+ * Official Groq API per-1M-token rates (USD) for supported models on TOMOYO ASISTEN.
+ * Pricing reference: https://groq.com/pricing
  */
 export const SUPPORTED_AI_MODELS: AiModelPricing[] = [
   {
-    id: 'gpt-4o-mini',
-    label: 'gpt-4o-mini (Cepat & Hemat)',
+    id: 'openai/gpt-oss-20b',
+    label: 'openai/gpt-oss-20b (Default · Cepat & Hemat)',
+    inputUsdPer1M: 0.075,
+    outputUsdPer1M: 0.3,
+    note: '$0.075 / 1M input · $0.30 / 1M output',
+  },
+  {
+    id: 'openai/gpt-oss-120b',
+    label: 'openai/gpt-oss-120b (Penalaran Lanjut)',
     inputUsdPer1M: 0.15,
     outputUsdPer1M: 0.6,
     note: '$0.15 / 1M input · $0.60 / 1M output',
   },
-  {
-    id: 'gpt-4.1-mini',
-    label: 'gpt-4.1-mini (Seimbang)',
-    inputUsdPer1M: 0.4,
-    outputUsdPer1M: 1.6,
-    note: '$0.40 / 1M input · $1.60 / 1M output',
-  },
-  {
-    id: 'gpt-5-mini',
-    label: 'gpt-5-mini (Penalaran Lanjut)',
-    inputUsdPer1M: 0.25,
-    outputUsdPer1M: 2.0,
-    note: '$0.25 / 1M input · $2.00 / 1M output',
-  },
 ];
+
+export function normalizeSupportedAiModel(candidate?: string | null): string {
+  const clean = (candidate || '').trim();
+  if (SUPPORTED_AI_MODELS.some((m) => m.id === clean)) {
+    return clean;
+  }
+  return DEFAULT_AI_MODEL;
+}
 
 export interface AiKnowledgeItem {
   id: string;
@@ -174,10 +178,10 @@ export function createDefaultAiSettings(): AiChatbotSettings {
     allowPublicStudentCount: false,
     maxRequestsPerSession: 20,
     maxInputLength: 600,
-    maxOutputTokens: 900,
+    maxOutputTokens: 1400,
     dailyRequestLimit: 500,
     monthlyRequestLimit: 10000,
-    model: 'gpt-4o-mini',
+    model: DEFAULT_AI_MODEL,
     updatedAtIso: new Date(0).toISOString(),
   };
 }
@@ -226,7 +230,7 @@ export function toPublicChatbotSettingsView(
   };
 }
 
-export function estimateOpenAiCostUsd(
+export function estimateAiCostUsd(
   model: string,
   inputTokens: number,
   outputTokens: number
@@ -240,6 +244,8 @@ export function estimateOpenAiCostUsd(
     (safeOut / 1_000_000) * found.outputUsdPer1M;
   return Number(cost.toFixed(6));
 }
+
+export const estimateOpenAiCostUsd = estimateAiCostUsd;
 
 export function getJakartaDateKey(date: Date = new Date()): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -305,7 +311,7 @@ export function sanitizeAiSettingsInput(
   const requestedModel = typeof raw.model === 'string' ? raw.model.trim() : current.model;
   const modelValid = SUPPORTED_AI_MODELS.some((m) => m.id === requestedModel)
     ? requestedModel
-    : current.model;
+    : normalizeSupportedAiModel(current.model);
 
   return {
     enabled: typeof raw.enabled === 'boolean' ? raw.enabled : current.enabled,
@@ -385,12 +391,13 @@ export function selectActiveKnowledgeNewestFirst(
 const PROMPT_INJECTION_PATTERNS = [
   /ignore\s+(all\s+)?(previous|above|prior|system)\s+instructions?/i,
   /abaikan\s+(semua\s+)?(instruksi|aturan|perintah)\s+(sebelumnya|sistem)/i,
-  /reveal\s+(your\s+)?(system\s+prompt|api\s*key|secret|openai)/i,
+  /reveal\s+(your\s+)?(system\s+prompt|api\s*key|secret|openai|groq)/i,
   /tampilkan\s+(system\s+prompt|api\s*key|kunci\s+api|rahasia)/i,
   /act\s+as\s+(root|developer|admin|system)/i,
   /saya\s+(adalah\s+)?admin\b/i,
   /give\s+me\s+admin\s+access/i,
-  /\bsk-[A-Za-z0-9_-]{16,}\b/,
+  /\b(?:sk|gsk)-[A-Za-z0-9_-]{16,}\b/,
+  /\bgsk_[A-Za-z0-9_-]{16,}\b/,
 ];
 
 export function detectPromptInjectionSignals(text: string): boolean {
@@ -398,8 +405,9 @@ export function detectPromptInjectionSignals(text: string): boolean {
 }
 
 export function sanitizeAssistantOutputForPublic(text: string): string {
-  // Never allow accidental secret leakage (OpenAI keys, Bearer tokens) in output
+  // Never allow accidental secret leakage (Groq gsk_ keys, sk_ keys, Bearer tokens) in output
   return text
+    .replace(/gsk_[A-Za-z0-9_-]{16,}/g, '[REDACTED]')
     .replace(/sk-(?:proj-)?[A-Za-z0-9_-]{16,}/g, '[REDACTED]')
     .replace(/Bearer\s+[A-Za-z0-9._-]{20,}/gi, '[REDACTED]');
 }
