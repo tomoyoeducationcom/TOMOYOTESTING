@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import firebaseConfig from '../../firebase-applet-config.json';
 import {
   type QuizAttemptRecord,
   type QuizDefinition,
@@ -7,26 +8,77 @@ import {
   buildQuizAttemptsCsv,
   checkQuizAvailability,
   countMatchingAttempts,
+  gradeQuizByAnswerHashes,
   gradeQuizSubmission,
   toStudentSafeQuiz,
   validateQuizPayload,
 } from '../lib/quizAndWaDomain';
 import { normalizeWhatsappPhone } from '../lib/domain';
+import {
+  fetchPublishedQuizFromFirestoreRest,
+  listPublishedQuizzesFromFirestoreRest,
+} from './quizFirestoreRest';
 import { readJsonData, writeJsonData } from './storage';
 
 const QUIZZES_FILE = 'quizzes.json';
 const ATTEMPTS_FILE = 'quiz-attempts.json';
-const SESSIONS_FILE = 'quiz-sessions.json';
+const SUBMITTED_SESSIONS_FILE = 'quiz-submitted-sessions.json';
 
-interface QuizSessionRecord {
-  sessionToken: string;
-  quizId: string;
-  studentName: string;
-  studentClass: string;
-  parentWhatsapp?: string;
-  startedAtIso: string;
-  deadlineIso?: string;
-  submitted: boolean;
+interface StatelessSessionPayload {
+  sid: string;
+  qid: string;
+  sn: string;
+  sc: string;
+  pw?: string;
+  st: string;
+  dl?: string;
+}
+
+function getQuizSessionSecret(): string {
+  return (
+    process.env.QUIZ_SESSION_SECRET ||
+    process.env.FONNTE_TOKEN ||
+    `tomoyo-quiz-hmac-${firebaseConfig.projectId}-${firebaseConfig.apiKey}`
+  );
+}
+
+function signQuizSession(payload: StatelessSessionPayload): string {
+  const encoded = Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64url');
+  const sig = crypto
+    .createHmac('sha256', getQuizSessionSecret())
+    .update(encoded)
+    .digest('base64url');
+  return `v1.${encoded}.${sig}`;
+}
+
+function verifyQuizSessionToken(
+  token: string,
+  expectedQuizId: string
+): StatelessSessionPayload | null {
+  if (!token || !token.startsWith('v1.')) return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  const [, encoded, sig] = parts;
+  const expectedSig = crypto
+    .createHmac('sha256', getQuizSessionSecret())
+    .update(encoded)
+    .digest('base64url');
+  const sigBuf = Buffer.from(sig);
+  const expBuf = Buffer.from(expectedSig);
+  if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(encoded, 'base64url').toString('utf-8')
+    ) as StatelessSessionPayload;
+    if (!parsed || parsed.qid !== expectedQuizId || !parsed.sn || !parsed.sc || !parsed.st) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 function loadQuizzes(): QuizDefinition[] {
@@ -49,21 +101,46 @@ function saveAttempts(attempts: QuizAttemptRecord[]) {
   writeJsonData(ATTEMPTS_FILE, attempts);
 }
 
-function loadSessions(): QuizSessionRecord[] {
-  return readJsonData<QuizSessionRecord[]>(SESSIONS_FILE, []);
+function loadSubmittedSessionIds(): string[] {
+  return readJsonData<string[]>(SUBMITTED_SESSIONS_FILE, []);
 }
 
-function saveSessions(sessions: QuizSessionRecord[]) {
-  writeJsonData(SESSIONS_FILE, sessions.slice(-1000));
-}
-
-export function listPublicQuizzes(): Array<
-  StudentSafeQuiz & {
-    availability: ReturnType<typeof checkQuizAvailability>;
+function markSessionSubmitted(sid: string) {
+  const existing = loadSubmittedSessionIds();
+  if (!existing.includes(sid)) {
+    existing.push(sid);
+    writeJsonData(SUBMITTED_SESSIONS_FILE, existing.slice(-2000));
   }
+}
+
+async function resolvePublicQuizWithSource(quizId: string): Promise<{
+  quiz: QuizDefinition | null;
+  source: 'firestore' | 'local';
+}> {
+  const firestoreQuiz = await fetchPublishedQuizFromFirestoreRest(quizId);
+  if (firestoreQuiz) {
+    return { quiz: firestoreQuiz, source: 'firestore' };
+  }
+  const localFound = loadQuizzes().find((q) => q.id === quizId) || null;
+  return { quiz: localFound, source: 'local' };
+}
+
+export async function listPublicQuizzes(): Promise<
+  Array<
+    StudentSafeQuiz & {
+      availability: ReturnType<typeof checkQuizAvailability>;
+    }
+  >
 > {
-  const quizzes = loadQuizzes();
-  return quizzes
+  const firestoreQuizzes = await listPublishedQuizzesFromFirestoreRest();
+  if (firestoreQuizzes.length > 0) {
+    return firestoreQuizzes.map((q) => ({
+      ...toStudentSafeQuiz(q),
+      availability: checkQuizAvailability(q),
+    }));
+  }
+  const localQuizzes = loadQuizzes();
+  return localQuizzes
     .filter((q) => q.status === 'published')
     .map((q) => ({
       ...toStudentSafeQuiz(q),
@@ -71,27 +148,26 @@ export function listPublicQuizzes(): Array<
     }));
 }
 
-export function getPublicQuizById(quizId: string): {
+export async function getPublicQuizById(quizId: string): Promise<{
   quiz: StudentSafeQuiz | null;
   availability: ReturnType<typeof checkQuizAvailability> | null;
-} {
-  const quizzes = loadQuizzes();
-  const found = quizzes.find((q) => q.id === quizId);
-  if (!found || found.status !== 'published') {
+}> {
+  const { quiz } = await resolvePublicQuizWithSource(quizId);
+  if (!quiz || quiz.status !== 'published') {
     return { quiz: null, availability: null };
   }
   return {
-    quiz: toStudentSafeQuiz(found),
-    availability: checkQuizAvailability(found),
+    quiz: toStudentSafeQuiz(quiz),
+    availability: checkQuizAvailability(quiz),
   };
 }
 
-export function startStudentQuizSession(input: {
+export async function startStudentQuizSession(input: {
   quizId: string;
   studentName: string;
   studentClass: string;
   parentWhatsapp?: string;
-}): {
+}): Promise<{
   ok: boolean;
   error?: string;
   sessionToken?: string;
@@ -99,7 +175,7 @@ export function startStudentQuizSession(input: {
   deadlineIso?: string;
   attemptsUsed?: number;
   quiz?: StudentSafeQuiz;
-} {
+}> {
   const studentName = input.studentName.trim();
   const studentClass = input.studentClass.trim();
   if (studentName.length < 2 || studentName.length > 120) {
@@ -109,8 +185,7 @@ export function startStudentQuizSession(input: {
     return { ok: false, error: 'Kelas wajib diisi.' };
   }
 
-  const quizzes = loadQuizzes();
-  const quiz = quizzes.find((q) => q.id === input.quizId);
+  const { quiz, source } = await resolvePublicQuizWithSource(input.quizId);
   if (!quiz) {
     return { ok: false, error: 'Kuis tidak ditemukan.' };
   }
@@ -120,13 +195,16 @@ export function startStudentQuizSession(input: {
     return { ok: false, error: avail.reason || 'Kuis belum dapat dikerjakan saat ini.' };
   }
 
-  const attempts = loadAttempts();
-  const attemptsUsed = countMatchingAttempts(attempts, quiz.id, studentName, studentClass);
-  if (quiz.maxAttempts > 0 && attemptsUsed >= quiz.maxAttempts) {
-    return {
-      ok: false,
-      error: `Batas maksimal pengerjaan (${quiz.maxAttempts} kali) untuk ${studentName} (${studentClass}) telah tercapai.`,
-    };
+  let attemptsUsed = 0;
+  if (source === 'local') {
+    const attempts = loadAttempts();
+    attemptsUsed = countMatchingAttempts(attempts, quiz.id, studentName, studentClass);
+    if (quiz.maxAttempts > 0 && attemptsUsed >= quiz.maxAttempts) {
+      return {
+        ok: false,
+        error: `Batas maksimal pengerjaan (${quiz.maxAttempts} kali) untuk ${studentName} (${studentClass}) telah tercapai.`,
+      };
+    }
   }
 
   const now = new Date();
@@ -136,21 +214,20 @@ export function startStudentQuizSession(input: {
       ? new Date(now.getTime() + quiz.timeLimitMinutes * 60 * 1000).toISOString()
       : undefined;
 
-  const sessionToken = crypto.randomUUID();
-  const sessions = loadSessions();
-  sessions.push({
-    sessionToken,
-    quizId: quiz.id,
-    studentName,
-    studentClass,
-    parentWhatsapp: input.parentWhatsapp?.trim()
-      ? normalizeWhatsappPhone(input.parentWhatsapp.trim())
-      : undefined,
-    startedAtIso,
-    deadlineIso,
-    submitted: false,
+  const sid = crypto.randomBytes(8).toString('hex');
+  const normalizedParentWa = input.parentWhatsapp?.trim()
+    ? normalizeWhatsappPhone(input.parentWhatsapp.trim())
+    : undefined;
+
+  const sessionToken = signQuizSession({
+    sid,
+    qid: quiz.id,
+    sn: studentName,
+    sc: studentClass,
+    ...(normalizedParentWa ? { pw: normalizedParentWa } : {}),
+    st: startedAtIso,
+    ...(deadlineIso ? { dl: deadlineIso } : {}),
   });
-  saveSessions(sessions);
 
   return {
     ok: true,
@@ -162,14 +239,14 @@ export function startStudentQuizSession(input: {
   };
 }
 
-export function submitStudentQuizAttempt(input: {
+export async function submitStudentQuizAttempt(input: {
   quizId: string;
   sessionToken?: string;
   studentName: string;
   studentClass: string;
   parentWhatsapp?: string;
   answers: Record<string, string>;
-}): {
+}): Promise<{
   ok: boolean;
   error?: string;
   result?: {
@@ -186,9 +263,9 @@ export function submitStudentQuizAttempt(input: {
     durationSeconds: number;
     submittedAtIso: string;
   };
-} {
-  const quizzes = loadQuizzes();
-  const quiz = quizzes.find((q) => q.id === input.quizId);
+  attemptRecord?: QuizAttemptRecord;
+}> {
+  const { quiz, source } = await resolvePublicQuizWithSource(input.quizId);
   if (!quiz) {
     return { ok: false, error: 'Kuis tidak ditemukan.' };
   }
@@ -198,22 +275,23 @@ export function submitStudentQuizAttempt(input: {
     return { ok: false, error: avail.reason || 'Kuis sudah tidak menerima jawaban.' };
   }
 
-  const sessions = loadSessions();
-  const sessionIdx = input.sessionToken
-    ? sessions.findIndex((s) => s.sessionToken === input.sessionToken && s.quizId === quiz.id)
-    : -1;
-
-  if (sessionIdx < 0) {
+  const session = input.sessionToken
+    ? verifyQuizSessionToken(input.sessionToken, quiz.id)
+    : null;
+  if (!session) {
     return { ok: false, error: 'Sesi pengerjaan kuis tidak valid atau sudah kedaluwarsa.' };
   }
 
-  const session = sessions[sessionIdx];
-  if (session.submitted) {
+  const submittedIds = loadSubmittedSessionIds();
+  if (submittedIds.includes(session.sid)) {
     return { ok: false, error: 'Jawaban pada sesi ini sudah pernah dikirim sebelumnya.' };
   }
 
   const nowMs = Date.now();
-  const startedMs = new Date(session.startedAtIso).getTime();
+  const startedMs = new Date(session.st).getTime();
+  if (Number.isNaN(startedMs)) {
+    return { ok: false, error: 'Waktu mulai sesi kuis tidak valid.' };
+  }
   const durationSeconds = Math.max(1, Math.round((nowMs - startedMs) / 1000));
 
   if (quiz.timeLimitMinutes > 0) {
@@ -226,31 +304,34 @@ export function submitStudentQuizAttempt(input: {
     }
   }
 
-  const attempts = loadAttempts();
-  const attemptsUsed = countMatchingAttempts(
-    attempts,
-    quiz.id,
-    session.studentName,
-    session.studentClass
-  );
-  if (quiz.maxAttempts > 0 && attemptsUsed >= quiz.maxAttempts) {
-    return {
-      ok: false,
-      error: `Batas maksimal percobaan (${quiz.maxAttempts}x) telah tercapai.`,
-    };
+  if (source === 'local') {
+    const attempts = loadAttempts();
+    const attemptsUsed = countMatchingAttempts(attempts, quiz.id, session.sn, session.sc);
+    if (quiz.maxAttempts > 0 && attemptsUsed >= quiz.maxAttempts) {
+      return {
+        ok: false,
+        error: `Batas maksimal percobaan (${quiz.maxAttempts}x) telah tercapai.`,
+      };
+    }
   }
 
-  const graded = gradeQuizSubmission(quiz, input.answers || {}, durationSeconds);
+  const hasPlainKeys = quiz.questions.every(
+    (q) => typeof q.correctOptionId === 'string' && q.correctOptionId.trim().length > 0
+  );
+  const graded = hasPlainKeys
+    ? gradeQuizSubmission(quiz, input.answers || {}, durationSeconds)
+    : await gradeQuizByAnswerHashes(quiz.id, quiz.questions, input.answers || {}, durationSeconds);
+
   const submittedAtIso = new Date().toISOString();
-  const attemptId = `att_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+  const attemptId = `att_${session.sid}`;
 
   const record: QuizAttemptRecord = {
     id: attemptId,
     quizId: quiz.id,
     quizTitle: quiz.title,
-    studentName: session.studentName,
-    studentClass: session.studentClass,
-    parentWhatsapp: session.parentWhatsapp,
+    studentName: session.sn,
+    studentClass: session.sc,
+    ...(session.pw ? { parentWhatsapp: session.pw } : {}),
     answers: input.answers || {},
     score: graded.score,
     maxScore: graded.maxScore,
@@ -259,16 +340,17 @@ export function submitStudentQuizAttempt(input: {
     wrongCount: graded.wrongCount,
     unansweredCount: graded.unansweredCount,
     durationSeconds,
-    startedAtIso: session.startedAtIso,
+    startedAtIso: session.st,
     submittedAtIso,
     gradedDetails: graded.gradedDetails,
   };
 
-  attempts.unshift(record);
-  saveAttempts(attempts);
-
-  sessions[sessionIdx] = { ...session, submitted: true };
-  saveSessions(sessions);
+  if (source === 'local') {
+    const attempts = loadAttempts();
+    attempts.unshift(record);
+    saveAttempts(attempts);
+  }
+  markSessionSubmitted(session.sid);
 
   return {
     ok: true,
@@ -286,10 +368,11 @@ export function submitStudentQuizAttempt(input: {
       durationSeconds: record.durationSeconds,
       submittedAtIso: record.submittedAtIso,
     },
+    attemptRecord: record,
   };
 }
 
-// Admin Quiz CRUD & Analytics
+// Local Admin Quiz CRUD & Analytics (retained for offline unit tests)
 export function listAdminQuizzes(): Array<
   QuizDefinition & { attemptCount: number }
 > {
@@ -365,16 +448,10 @@ export function deleteAdminQuiz(quizId: string): boolean {
   if (next.length === quizzes.length) return false;
   saveQuizzes(next);
 
-  // Clean up sessions and attempts tied to deleted quiz so ghost dummy records do not remain
   const attempts = loadAttempts();
   const nextAttempts = attempts.filter((a) => a.quizId !== quizId);
   if (nextAttempts.length !== attempts.length) {
     saveAttempts(nextAttempts);
-  }
-  const sessions = loadSessions();
-  const nextSessions = sessions.filter((s) => s.quizId !== quizId);
-  if (nextSessions.length !== sessions.length) {
-    saveSessions(nextSessions);
   }
   return true;
 }

@@ -509,14 +509,14 @@ export function createApp() {
   // PUBLIC ONLINE QUIZ ROUTES (NO LOGIN REQUIRED — KEYS NEVER EXPOSED)
   // ============================================================================
 
-  app.get('/api/quizzes', (_req, res) => {
+  app.get('/api/quizzes', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ quizzes: listPublicQuizzes() });
+    res.json({ quizzes: await listPublicQuizzes() });
   });
 
-  app.get('/api/quizzes/:quizId', (req, res) => {
+  app.get('/api/quizzes/:quizId', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    const data = getPublicQuizById(req.params.quizId);
+    const data = await getPublicQuizById(req.params.quizId);
     if (!data.quiz) {
       res.status(404).json({ error: 'Kuis tidak ditemukan atau belum diterbitkan.' });
       return;
@@ -524,13 +524,13 @@ export function createApp() {
     res.json(data);
   });
 
-  app.post('/api/quizzes/:quizId/start', (req, res) => {
+  app.post('/api/quizzes/:quizId/start', async (req, res) => {
     const body = (req.body || {}) as {
       studentName?: string;
       studentClass?: string;
       parentWhatsapp?: string;
     };
-    const started = startStudentQuizSession({
+    const started = await startStudentQuizSession({
       quizId: req.params.quizId,
       studentName: typeof body.studentName === 'string' ? body.studentName : '',
       studentClass: typeof body.studentClass === 'string' ? body.studentClass : '',
@@ -543,7 +543,7 @@ export function createApp() {
     res.json(started);
   });
 
-  app.post('/api/quizzes/:quizId/submit', (req, res) => {
+  app.post('/api/quizzes/:quizId/submit', async (req, res) => {
     const body = (req.body || {}) as {
       sessionToken?: string;
       studentName?: string;
@@ -551,7 +551,7 @@ export function createApp() {
       parentWhatsapp?: string;
       answers?: Record<string, string>;
     };
-    const outcome = submitStudentQuizAttempt({
+    const outcome = await submitStudentQuizAttempt({
       quizId: req.params.quizId,
       sessionToken: body.sessionToken,
       studentName: typeof body.studentName === 'string' ? body.studentName : '',
@@ -569,6 +569,57 @@ export function createApp() {
   // ============================================================================
   // ADMIN QUIZ MANAGEMENT ROUTES
   // ============================================================================
+
+  app.post('/api/admin/quizzes/:quizId/notify', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+
+    const body = (req.body || {}) as {
+      title?: string;
+      targetClass?: string;
+      notifyTarget?: string;
+    };
+    const notifyTarget = typeof body.notifyTarget === 'string' ? body.notifyTarget.trim() : '';
+    const title = typeof body.title === 'string' ? body.title.trim() : '';
+    const targetClass = typeof body.targetClass === 'string' ? body.targetClass.trim() : 'Semua Tingkat';
+    if (!notifyTarget || !title) {
+      res.status(400).json({ error: 'Target WhatsApp dan judul kuis wajib diisi.' });
+      return;
+    }
+
+    const settings = getWaSettings();
+    let autoDispatch: unknown = null;
+    if (settings.autoNotifyQuizPublished) {
+      const templates = listWaTemplates();
+      const tpl = templates.find((t) => t.id === settings.autoQuizTemplateId);
+      const baseUrl = resolveBaseUrl(req);
+      const quizUrl = `${baseUrl}/kuis/${req.params.quizId}`;
+      const rawMsg =
+        tpl?.content ||
+        `Kuis Online baru tersedia: *${title}* (${targetClass}). Kerjakan di ${quizUrl}`;
+      const rendered = renderTemplateVariables(rawMsg, {
+        nama_siswa: 'Siswa-siswi TOMOYO',
+        nama_orang_tua: 'Bapak/Ibu',
+        kelas: targetClass,
+        nama_program: title,
+        jadwal: quizUrl,
+      });
+      const target = notifyTarget.endsWith('@g.us')
+        ? notifyTarget
+        : normalizeWhatsappPhone(notifyTarget);
+      if (target) {
+        autoDispatch = await sendFonnteWhatsApp({
+          target,
+          message: rendered.rendered,
+        });
+      }
+    }
+
+    res.json({ ok: true, autoDispatch });
+  });
 
   app.get('/api/admin/quizzes', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');

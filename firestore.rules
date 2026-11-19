@@ -234,11 +234,11 @@ service cloud.firestore {
     }
 
     function isValidPublicQuiz(data) {
-      return data.keys().hasAll(['title', 'status', 'isPublished', 'questionsCount', 'createdAt', 'updatedAt'])
+      return data.keys().hasAll(['title', 'status', 'isPublished', 'questionsCount', 'questions', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly([
           'title', 'description', 'instructions', 'targetClass', 'status',
           'isPublished', 'timeLimitMinutes', 'maxAttempts', 'startAtIso', 'endAtIso',
-          'questionsCount', 'createdAt', 'updatedAt'
+          'questionsCount', 'totalPoints', 'questions', 'createdAt', 'updatedAt'
         ])
         && data.title is string && data.title.size() >= 1 && data.title.size() <= 180
         && (!('description' in data) || (data.description is string && data.description.size() <= 1000))
@@ -250,38 +250,51 @@ service cloud.firestore {
         && (!('maxAttempts' in data) || (data.maxAttempts is number && data.maxAttempts >= 0))
         && (!('startAtIso' in data) || (data.startAtIso is string && data.startAtIso.size() <= 50))
         && (!('endAtIso' in data) || (data.endAtIso is string && data.endAtIso.size() <= 50))
-        && data.questionsCount is number && data.questionsCount >= 0 && data.questionsCount <= 100
+        && data.questionsCount is number && data.questionsCount >= 1 && data.questionsCount <= 100
+        && (!('totalPoints' in data) || (data.totalPoints is number && data.totalPoints >= 0))
+        && data.questions is list && data.questions.size() >= 1 && data.questions.size() <= 100
+        && data.questions[0] is map
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
 
     function isValidQuizKey(data) {
-      return data.keys().hasAll(['quizId', 'questionCount', 'updatedAt'])
-        && data.keys().hasOnly(['quizId', 'questionCount', 'updatedAt'])
+      return data.keys().hasAll(['quizId', 'questionCount', 'answers', 'updatedAt'])
+        && data.keys().hasOnly(['quizId', 'questionCount', 'answers', 'updatedAt'])
         && data.quizId is string && data.quizId.size() >= 1 && data.quizId.size() <= 128
-        && data.questionCount is number && data.questionCount >= 0 && data.questionCount <= 100
+        && data.questionCount is number && data.questionCount >= 1 && data.questionCount <= 100
+        && data.answers is map && data.answers.size() >= 1 && data.answers.size() <= 100
         && data.updatedAt is timestamp;
     }
 
     function isValidQuizAttempt(data) {
       return data.keys().hasAll([
-          'quizId', 'studentName', 'studentClass', 'score', 'maxScore',
-          'correctCount', 'wrongCount', 'submittedAtIso', 'createdAt'
+          'quizId', 'quizTitle', 'studentName', 'studentClass', 'score', 'maxScore',
+          'percentage', 'correctCount', 'wrongCount', 'unansweredCount',
+          'submittedAtIso', 'createdAt'
         ])
         && data.keys().hasOnly([
-          'quizId', 'studentName', 'studentClass', 'parentWhatsapp', 'score', 'maxScore',
-          'correctCount', 'wrongCount', 'durationSeconds', 'submittedAtIso', 'createdAt'
+          'quizId', 'quizTitle', 'studentName', 'studentClass', 'parentWhatsapp',
+          'answers', 'score', 'maxScore', 'percentage',
+          'correctCount', 'wrongCount', 'unansweredCount',
+          'durationSeconds', 'startedAtIso', 'submittedAtIso', 'gradedDetails', 'createdAt'
         ])
         && data.quizId is string && data.quizId.size() >= 1 && data.quizId.size() <= 128
+        && data.quizTitle is string && data.quizTitle.size() >= 1 && data.quizTitle.size() <= 180
         && data.studentName is string && data.studentName.size() >= 1 && data.studentName.size() <= 120
         && data.studentClass is string && data.studentClass.size() >= 1 && data.studentClass.size() <= 60
         && (!('parentWhatsapp' in data) || (data.parentWhatsapp is string && data.parentWhatsapp.size() <= 30))
+        && (!('answers' in data) || (data.answers is map && data.answers.size() <= 100))
         && data.score is number && data.score >= 0
         && data.maxScore is number && data.maxScore >= 0
+        && data.percentage is number && data.percentage >= 0 && data.percentage <= 100
         && data.correctCount is number && data.correctCount >= 0
         && data.wrongCount is number && data.wrongCount >= 0
+        && data.unansweredCount is number && data.unansweredCount >= 0
         && (!('durationSeconds' in data) || (data.durationSeconds is number && data.durationSeconds >= 0))
+        && (!('startedAtIso' in data) || (data.startedAtIso is string && data.startedAtIso.size() <= 50))
         && data.submittedAtIso is string && data.submittedAtIso.size() <= 50
+        && (!('gradedDetails' in data) || (data.gradedDetails is list && data.gradedDetails.size() <= 100))
         && data.createdAt is timestamp;
     }
 
@@ -502,7 +515,7 @@ service cloud.firestore {
       allow delete: if isValidId(logId) && isAdmin();
     }
 
-    // Online Quizzes (Public metadata without answer keys, Admin write)
+    // Online Quizzes (Public questions WITHOUT plain answer keys, Admin write)
     match /quizzes/{quizId} {
       allow get: if isValidId(quizId) && (resource == null || existing().isPublished == true || isAdmin());
       allow list: if isAdmin() || existing().isPublished == true;
@@ -513,27 +526,33 @@ service cloud.firestore {
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'title', 'description', 'instructions', 'targetClass', 'status',
           'isPublished', 'timeLimitMinutes', 'maxAttempts', 'startAtIso', 'endAtIso',
-          'questionsCount', 'updatedAt'
+          'questionsCount', 'totalPoints', 'questions', 'updatedAt'
         ]);
       allow delete: if isValidId(quizId) && isAdmin();
     }
 
-    // Quiz Keys (Strictly Admin-only)
+    // Quiz Keys (Strictly Admin-only: holds plain correctOptionId & teacher explanations)
     match /quizKeys/{quizId} {
       allow get: if isValidId(quizId) && isAdmin();
       allow list: if isAdmin();
       allow create: if isValidId(quizId) && isAdmin() && isValidQuizKey(incoming()) && incoming().updatedAt == request.time;
       allow update: if isValidId(quizId) && isAdmin() && isValidQuizKey(incoming()) && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['quizId', 'questionCount', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['quizId', 'questionCount', 'answers', 'updatedAt']);
       allow delete: if isValidId(quizId) && isAdmin();
     }
 
-    // Quiz Attempts (Strictly Admin-only in Firestore; created/graded via backend)
+    // Quiz Attempts (Student create validated against published quiz, Admin read/delete only)
     match /quizAttempts/{attemptId} {
       allow get: if isValidId(attemptId) && isAdmin();
       allow list: if isAdmin();
-      allow create: if isValidId(attemptId) && isAdmin() && isValidQuizAttempt(incoming())
-        && incoming().createdAt == request.time;
+      allow create: if isValidId(attemptId)
+        && isValidQuizAttempt(incoming())
+        && incoming().createdAt == request.time
+        && (
+          isAdmin() ||
+          (exists(/databases/$(database)/documents/quizzes/$(incoming().quizId))
+            && get(/databases/$(database)/documents/quizzes/$(incoming().quizId)).data.isPublished == true)
+        );
       allow update: if false;
       allow delete: if isValidId(attemptId) && isAdmin();
     }

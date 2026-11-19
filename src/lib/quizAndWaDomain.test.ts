@@ -13,8 +13,10 @@ import {
   buildCampaignReportCsv,
   buildQuizAttemptsCsv,
   checkQuizAvailability,
+  computeQuestionAnswerHash,
   countMatchingAttempts,
   deduplicateAndFilterRecipients,
+  gradeQuizByAnswerHashes,
   gradeQuizSubmission,
   parseContactsCsvText,
   recalculateCampaignCounts,
@@ -338,14 +340,14 @@ test('campaign queue recount and CSV export utilities produce valid output', () 
   assert.ok(allCsv.includes('Nilai (0-100)'));
 });
 
-test('deleting all quizzes persists empty state without respawning dummy quizzes and exposes student recap', () => {
+test('deleting all quizzes persists empty state without respawning dummy quizzes and exposes student recap', async () => {
   const dataDir = path.resolve(process.cwd(), '.data');
   const quizzesPath = path.join(dataDir, 'quizzes.json');
   const attemptsPath = path.join(dataDir, 'quiz-attempts.json');
-  const sessionsPath = path.join(dataDir, 'quiz-sessions.json');
+  const submittedPath = path.join(dataDir, 'quiz-submitted-sessions.json');
   const prevQuizzes = fs.existsSync(quizzesPath) ? fs.readFileSync(quizzesPath, 'utf-8') : null;
   const prevAttempts = fs.existsSync(attemptsPath) ? fs.readFileSync(attemptsPath, 'utf-8') : null;
-  const prevSessions = fs.existsSync(sessionsPath) ? fs.readFileSync(sessionsPath, 'utf-8') : null;
+  const prevSubmitted = fs.existsSync(submittedPath) ? fs.readFileSync(submittedPath, 'utf-8') : null;
 
   try {
     const saved = upsertAdminQuiz({
@@ -355,14 +357,14 @@ test('deleting all quizzes persists empty state without respawning dummy quizzes
     assert.equal(saved.ok, true);
     assert.ok(listAdminQuizzes().some((q) => q.id === 'kuis-test-persist-del'));
 
-    const session = startStudentQuizSession({
+    const session = await startStudentQuizSession({
       quizId: 'kuis-test-persist-del',
       studentName: 'Nadia Kusuma',
       studentClass: 'Kelas 3 SD',
     });
     assert.equal(session.ok, true);
 
-    const submitted = submitStudentQuizAttempt({
+    const submitted = await submitStudentQuizAttempt({
       quizId: 'kuis-test-persist-del',
       sessionToken: session.sessionToken,
       studentName: 'Nadia Kusuma',
@@ -370,6 +372,7 @@ test('deleting all quizzes persists empty state without respawning dummy quizzes
       answers: { q1: 'b', q2: 'b', q3: 'true', q4: 'b' },
     });
     assert.equal(submitted.ok, true);
+    assert.equal(submitted.attemptRecord?.studentName, 'Nadia Kusuma');
 
     const recap = listAllAdminQuizAttempts();
     const nadiaAttempt = recap.find((a) => a.studentName === 'Nadia Kusuma');
@@ -389,7 +392,8 @@ test('deleting all quizzes persists empty state without respawning dummy quizzes
       assert.equal(deleteAdminQuiz(q.id), true);
     }
     assert.equal(listAdminQuizzes().length, 0);
-    assert.equal(listPublicQuizzes().length, 0);
+    const remainingPublic = await listPublicQuizzes();
+    assert.equal(remainingPublic.some((q) => q.id === 'kuis-test-persist-del'), false);
   } finally {
     if (prevQuizzes !== null) fs.writeFileSync(quizzesPath, prevQuizzes, 'utf-8');
     else if (fs.existsSync(quizzesPath)) fs.unlinkSync(quizzesPath);
@@ -397,8 +401,8 @@ test('deleting all quizzes persists empty state without respawning dummy quizzes
     if (prevAttempts !== null) fs.writeFileSync(attemptsPath, prevAttempts, 'utf-8');
     else if (fs.existsSync(attemptsPath)) fs.unlinkSync(attemptsPath);
 
-    if (prevSessions !== null) fs.writeFileSync(sessionsPath, prevSessions, 'utf-8');
-    else if (fs.existsSync(sessionsPath)) fs.unlinkSync(sessionsPath);
+    if (prevSubmitted !== null) fs.writeFileSync(submittedPath, prevSubmitted, 'utf-8');
+    else if (fs.existsSync(submittedPath)) fs.unlinkSync(submittedPath);
   }
 });
 
@@ -462,6 +466,97 @@ test('question imageUrl is validated, preserved for students, and stored in grad
   } finally {
     if (prevQuizzes !== null) fs.writeFileSync(quizzesPath, prevQuizzes, 'utf-8');
     else if (fs.existsSync(quizzesPath)) fs.unlinkSync(quizzesPath);
+  }
+});
+
+test('hash-based grading and stateless HMAC session tokens validate accurately without plain answer keys', async () => {
+  const hashedQuestions = await Promise.all(
+    TEST_QUIZ_FIXTURE.questions.map(async (q) => ({
+      id: q.id,
+      order: q.order,
+      prompt: q.prompt,
+      imageUrl: q.imageUrl,
+      options: q.options,
+      points: q.points,
+      answerHash: await computeQuestionAnswerHash(
+        TEST_QUIZ_FIXTURE.id,
+        q.id,
+        q.correctOptionId
+      ),
+    }))
+  );
+
+  const graded = await gradeQuizByAnswerHashes(
+    TEST_QUIZ_FIXTURE.id,
+    hashedQuestions,
+    { q1: 'b', q2: 'b', q3: 'false' },
+    95
+  );
+  assert.equal(graded.score, 50);
+  assert.equal(graded.maxScore, 100);
+  assert.equal(graded.percentage, 50);
+  assert.equal(graded.correctCount, 2);
+  assert.equal(graded.wrongCount, 2);
+  assert.equal(graded.unansweredCount, 1);
+
+  const dataDir = path.resolve(process.cwd(), '.data');
+  const quizzesPath = path.join(dataDir, 'quizzes.json');
+  const attemptsPath = path.join(dataDir, 'quiz-attempts.json');
+  const submittedPath = path.join(dataDir, 'quiz-submitted-sessions.json');
+  const prevQuizzes = fs.existsSync(quizzesPath) ? fs.readFileSync(quizzesPath, 'utf-8') : null;
+  const prevAttempts = fs.existsSync(attemptsPath) ? fs.readFileSync(attemptsPath, 'utf-8') : null;
+  const prevSubmitted = fs.existsSync(submittedPath) ? fs.readFileSync(submittedPath, 'utf-8') : null;
+
+  try {
+    upsertAdminQuiz({ ...TEST_QUIZ_FIXTURE, id: 'kuis-hmac-stateless' });
+    const started = await startStudentQuizSession({
+      quizId: 'kuis-hmac-stateless',
+      studentName: 'Bima Sakti',
+      studentClass: 'Kelas 5 SD',
+    });
+    assert.equal(started.ok, true);
+    assert.ok(started.sessionToken?.startsWith('v1.'));
+
+    // Tampered token must be rejected
+    const tampered = await submitStudentQuizAttempt({
+      quizId: 'kuis-hmac-stateless',
+      sessionToken: `${started.sessionToken}tamper`,
+      studentName: 'Bima Sakti',
+      studentClass: 'Kelas 5 SD',
+      answers: { q1: 'b' },
+    });
+    assert.equal(tampered.ok, false);
+
+    // Valid token succeeds and returns attemptRecord for Firestore persistence
+    const okRes = await submitStudentQuizAttempt({
+      quizId: 'kuis-hmac-stateless',
+      sessionToken: started.sessionToken,
+      studentName: 'Bima Sakti',
+      studentClass: 'Kelas 5 SD',
+      answers: { q1: 'b', q2: 'b', q3: 'true', q4: 'b' },
+    });
+    assert.equal(okRes.ok, true);
+    assert.equal(okRes.result?.percentage, 100);
+    assert.equal(okRes.attemptRecord?.quizId, 'kuis-hmac-stateless');
+
+    // Duplicate replay with same token is rejected
+    const replay = await submitStudentQuizAttempt({
+      quizId: 'kuis-hmac-stateless',
+      sessionToken: started.sessionToken,
+      studentName: 'Bima Sakti',
+      studentClass: 'Kelas 5 SD',
+      answers: { q1: 'b' },
+    });
+    assert.equal(replay.ok, false);
+  } finally {
+    if (prevQuizzes !== null) fs.writeFileSync(quizzesPath, prevQuizzes, 'utf-8');
+    else if (fs.existsSync(quizzesPath)) fs.unlinkSync(quizzesPath);
+
+    if (prevAttempts !== null) fs.writeFileSync(attemptsPath, prevAttempts, 'utf-8');
+    else if (fs.existsSync(attemptsPath)) fs.unlinkSync(attemptsPath);
+
+    if (prevSubmitted !== null) fs.writeFileSync(submittedPath, prevSubmitted, 'utf-8');
+    else if (fs.existsSync(submittedPath)) fs.unlinkSync(submittedPath);
   }
 });
 

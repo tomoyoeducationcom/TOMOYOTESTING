@@ -229,7 +229,7 @@
     },
     "PublicQuiz": {
       "title": "PublicQuiz",
-      "description": "Publicly readable quiz metadata and questions WITHOUT answer keys.",
+      "description": "Publicly readable quiz metadata and questions with hashed answer verification (never plain answer keys).",
       "type": "object",
       "properties": {
         "title": { "type": "string", "maxLength": 180 },
@@ -243,40 +243,49 @@
         "startAtIso": { "type": "string", "maxLength": 50 },
         "endAtIso": { "type": "string", "maxLength": 50 },
         "questionsCount": { "type": "number" },
+        "totalPoints": { "type": "number" },
+        "questions": { "type": "array" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["title", "status", "isPublished", "questionsCount", "createdAt", "updatedAt"]
+      "required": ["title", "status", "isPublished", "questionsCount", "questions", "createdAt", "updatedAt"]
     },
     "QuizKey": {
       "title": "QuizKey",
-      "description": "Strictly admin-only quiz answer keys and point weights (never readable by students).",
+      "description": "Strictly admin-only quiz answer keys and teacher explanations (never readable by students).",
       "type": "object",
       "properties": {
         "quizId": { "type": "string", "maxLength": 128 },
         "questionCount": { "type": "number" },
+        "answers": { "type": "object" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["quizId", "questionCount", "updatedAt"]
+      "required": ["quizId", "questionCount", "answers", "updatedAt"]
     },
     "QuizAttempt": {
       "title": "QuizAttempt",
-      "description": "Graded student quiz submission (Admin read/manage only).",
+      "description": "Graded student quiz submission (student-created on published quizzes, Admin read/delete only).",
       "type": "object",
       "properties": {
         "quizId": { "type": "string", "maxLength": 128 },
+        "quizTitle": { "type": "string", "maxLength": 180 },
         "studentName": { "type": "string", "maxLength": 120 },
         "studentClass": { "type": "string", "maxLength": 60 },
         "parentWhatsapp": { "type": "string", "maxLength": 30 },
+        "answers": { "type": "object" },
         "score": { "type": "number" },
         "maxScore": { "type": "number" },
+        "percentage": { "type": "number" },
         "correctCount": { "type": "number" },
         "wrongCount": { "type": "number" },
+        "unansweredCount": { "type": "number" },
         "durationSeconds": { "type": "number" },
+        "startedAtIso": { "type": "string", "maxLength": 50 },
         "submittedAtIso": { "type": "string", "maxLength": 50 },
+        "gradedDetails": { "type": "array" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["quizId", "studentName", "studentClass", "score", "maxScore", "correctCount", "wrongCount", "submittedAtIso", "createdAt"]
+      "required": ["quizId", "quizTitle", "studentName", "studentClass", "score", "maxScore", "percentage", "correctCount", "wrongCount", "unansweredCount", "submittedAtIso", "createdAt"]
     },
     "WaGroupItem": {
       "title": "WaGroupItem",

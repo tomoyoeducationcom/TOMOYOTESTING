@@ -13,14 +13,42 @@ import {
 } from 'lucide-react';
 import { PagePhotoHero } from '../components/IndramayuMotifs';
 import heroStudentStudy from '../assets/images/hero_student_study_1795063097881.jpg';
-import type { StudentSafeQuiz } from '../lib/quizAndWaDomain';
+import { normalizeParticipantIdentity, type StudentSafeQuiz } from '../lib/quizAndWaDomain';
+import {
+  fetchPublishedQuizByIdFromFirestore,
+  fetchPublishedQuizzesFromFirestore,
+  isFirestorePermissionDeniedError,
+  saveStudentQuizAttemptToFirestore,
+  type PublicQuizListItem,
+} from '../lib/quizFirestore';
 
-interface PublicQuizListItem extends StudentSafeQuiz {
-  availability: {
-    available: boolean;
-    state: 'active' | 'draft' | 'disabled' | 'upcoming' | 'ended';
-    reason?: string;
-  };
+const LOCAL_ATTEMPT_COUNTS_KEY = 'tomoyo_quiz_attempts_v1';
+
+function getLocalAttemptKey(quizId: string, studentName: string, studentClass: string): string {
+  return `${quizId}::${normalizeParticipantIdentity(studentName)}::${normalizeParticipantIdentity(studentClass)}`;
+}
+
+function getLocalAttemptCount(quizId: string, studentName: string, studentClass: string): number {
+  try {
+    const raw = window.localStorage.getItem(LOCAL_ATTEMPT_COUNTS_KEY);
+    if (!raw) return 0;
+    const map = JSON.parse(raw) as Record<string, number>;
+    return Number(map[getLocalAttemptKey(quizId, studentName, studentClass)]) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function incrementLocalAttemptCount(quizId: string, studentName: string, studentClass: string) {
+  try {
+    const raw = window.localStorage.getItem(LOCAL_ATTEMPT_COUNTS_KEY);
+    const map = raw ? (JSON.parse(raw) as Record<string, number>) : {};
+    const key = getLocalAttemptKey(quizId, studentName, studentClass);
+    map[key] = (Number(map[key]) || 0) + 1;
+    window.localStorage.setItem(LOCAL_ATTEMPT_COUNTS_KEY, JSON.stringify(map));
+  } catch {
+    // ignore storage errors
+  }
 }
 
 interface QuizSubmissionResult {
@@ -64,15 +92,19 @@ function QuizDirectoryPage() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch('/api/quizzes', { cache: 'no-store' });
-        if (!res.ok) throw new Error('Gagal memuat daftar kuis.');
-        const data = (await res.json()) as { quizzes?: PublicQuizListItem[] };
+        const list = await fetchPublishedQuizzesFromFirestore();
         if (!cancelled) {
-          setQuizzes(Array.isArray(data.quizzes) ? data.quizzes : []);
+          setQuizzes(list);
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Gagal memuat daftar kuis.');
+          if (isFirestorePermissionDeniedError(err)) {
+            setError(
+              'Kuis belum dapat dimuat karena aturan Firestore belum diperbarui. Silakan hubungi admin TOMOYO Education.'
+            );
+          } else {
+            setError(err instanceof Error ? err.message : 'Gagal memuat daftar kuis.');
+          }
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -222,6 +254,7 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [saveWarning, setSaveWarning] = useState<string | null>(null);
   const [confirmUnanswered, setConfirmUnanswered] = useState(false);
   const [result, setResult] = useState<QuizSubmissionResult | null>(null);
 
@@ -235,12 +268,9 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
       setLoading(true);
       setLoadError(null);
       try {
-        const res = await fetch(`/api/quizzes/${encodeURIComponent(quizId)}`, {
-          cache: 'no-store',
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data?.error || 'Kuis tidak ditemukan.');
+        const data = await fetchPublishedQuizByIdFromFirestore(quizId);
+        if (!data.quiz) {
+          throw new Error('Kuis tidak ditemukan atau belum diterbitkan.');
         }
         if (!cancelled) {
           setQuiz(data.quiz);
@@ -263,6 +293,7 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
     if (!quiz || !sessionToken || submitting) return;
     setSubmitting(true);
     setSubmitError(null);
+    setSaveWarning(null);
     try {
       const res = await fetch(`/api/quizzes/${encodeURIComponent(quiz.id)}/submit`, {
         method: 'POST',
@@ -279,6 +310,18 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
       if (!res.ok || !data.ok) {
         throw new Error(data?.error || 'Gagal mengirim jawaban kuis.');
       }
+
+      if (data.attemptRecord) {
+        try {
+          await saveStudentQuizAttemptToFirestore(data.attemptRecord);
+        } catch {
+          setSaveWarning(
+            'Nilai sudah dihitung, namun arsip nilai ke rekap admin belum tersimpan otomatis. Hubungi admin bila nilai belum muncul di rekap.'
+          );
+        }
+      }
+
+      incrementLocalAttemptCount(quiz.id, studentName.trim(), studentClass.trim());
       setResult(data.result);
       setStage('result');
     } catch (err) {
@@ -320,6 +363,17 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
     e.preventDefault();
     if (!quiz) return;
     setStartError(null);
+
+    if (
+      quiz.maxAttempts > 0 &&
+      getLocalAttemptCount(quiz.id, studentName.trim(), studentClass.trim()) >= quiz.maxAttempts
+    ) {
+      setStartError(
+        `Batas maksimal pengerjaan (${quiz.maxAttempts} kali) untuk ${studentName.trim()} (${studentClass.trim()}) telah tercapai.`
+      );
+      return;
+    }
+
     setStarting(true);
     submittedAutoRef.current = false;
     try {
@@ -342,6 +396,7 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
       setAnswers({});
       setConfirmUnanswered(false);
       setSubmitError(null);
+      setSaveWarning(null);
       setStage('running');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
@@ -737,6 +792,12 @@ function SingleQuizRunnerPage({ quizId }: { quizId: string }) {
                 </p>
               </div>
             </div>
+
+            {saveWarning && (
+              <div role="alert" className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900">
+                {saveWarning}
+              </div>
+            )}
 
             <p className="text-xs text-[#626E7E] leading-relaxed">
               Hasil pengerjaan Anda telah tercatat otomatis oleh sistem penilaian TOMOYO Education untuk ditinjau oleh guru pembimbing.

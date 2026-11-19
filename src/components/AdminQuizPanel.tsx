@@ -17,18 +17,24 @@ import {
   X,
 } from 'lucide-react';
 import { uploadImageToCloudinary } from '../lib/cloudinary';
-import type {
-  QuizAttemptRecord,
-  QuizDefinition,
-  QuizQuestion,
-  QuizQuestionType,
-  QuizStatus,
+import {
+  buildAllQuizAttemptsCsv,
+  buildQuizAttemptsCsv,
+  type QuizAttemptRecord,
+  type QuizDefinition,
+  type QuizQuestion,
+  type QuizQuestionType,
+  type QuizStatus,
 } from '../lib/quizAndWaDomain';
+import {
+  adminDeleteQuizAttemptFromFirestore,
+  adminDeleteQuizFromFirestore,
+  adminFetchQuizzesAndAttemptsFromFirestore,
+  adminSaveQuizToFirestore,
+  isFirestorePermissionDeniedError,
+  type AdminQuizItem,
+} from '../lib/quizFirestore';
 import { formatJakartaDateTime } from '../lib/domain';
-
-interface AdminQuizItem extends QuizDefinition {
-  attemptCount: number;
-}
 
 function createEmptyQuestion(order: number, type: QuizQuestionType = 'multiple_choice'): QuizQuestion {
   const id = `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -111,28 +117,22 @@ export function AdminQuizPanel({ user }: { user: User }) {
     setLoading(true);
     setError(null);
     try {
-      const token = await user.getIdToken();
-      const [quizRes, attemptsRes] = await Promise.all([
-        fetch('/api/admin/quizzes', {
-          cache: 'no-store',
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch('/api/admin/quiz-attempts', {
-          cache: 'no-store',
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-      ]);
-      const quizData = await quizRes.json();
-      if (!quizRes.ok) throw new Error(quizData?.error || 'Gagal memuat data kuis.');
-      const attemptsData = attemptsRes.ok ? await attemptsRes.json() : { attempts: [] };
-      setQuizzes(Array.isArray(quizData.quizzes) ? quizData.quizzes : []);
-      setAllAttempts(Array.isArray(attemptsData.attempts) ? attemptsData.attempts : []);
+      const { quizzes: fsQuizzes, attempts: fsAttempts } =
+        await adminFetchQuizzesAndAttemptsFromFirestore();
+      setQuizzes(fsQuizzes);
+      setAllAttempts(fsAttempts);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal memuat data kuis.');
+      if (isFirestorePermissionDeniedError(err)) {
+        setError(
+          'Akses Firestore ditolak (permission-denied). Pastikan login sebagai admin resmi dan sudah mem-publish firestore.rules terbaru di Firebase Console (database ai-studio-8509be80-871b-4707-80a4-526f1d69f7ad).'
+        );
+      } else {
+        setError(err instanceof Error ? err.message : 'Gagal memuat data kuis.');
+      }
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, []);
 
   useEffect(() => {
     loadQuizzes();
@@ -180,29 +180,44 @@ export function AdminQuizPanel({ user }: { user: User }) {
     setEditorErrors([]);
     setBanner(null);
     try {
-      const token = await user.getIdToken();
-      const res = await fetch('/api/admin/quizzes', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          ...editingDraft,
-          notifyTarget: notifyTarget.trim() || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.ok) {
-        setEditorErrors(Array.isArray(data.errors) ? data.errors : [data.error || 'Gagal menyimpan kuis.']);
+      const saved = await adminSaveQuizToFirestore(editingDraft);
+      if (!saved.ok || !saved.quiz) {
+        setEditorErrors(saved.errors || ['Data kuis tidak valid.']);
         return;
       }
+
+      if (saved.quiz.status === 'published' && notifyTarget.trim()) {
+        try {
+          const token = await user.getIdToken();
+          await fetch(`/api/admin/quizzes/${encodeURIComponent(saved.quiz.id)}/notify`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              title: saved.quiz.title,
+              targetClass: saved.quiz.targetClass,
+              notifyTarget: notifyTarget.trim(),
+            }),
+          });
+        } catch {
+          // Notification failure should not block quiz persistence
+        }
+      }
+
       setEditingDraft(null);
       setNotifyTarget('');
-      setBanner(`Kuis "${data.quiz.title}" berhasil disimpan.`);
+      setBanner(`Kuis "${saved.quiz.title}" berhasil disimpan permanen ke Firestore.`);
       await loadQuizzes();
     } catch (err) {
-      setEditorErrors([err instanceof Error ? err.message : 'Gagal menyimpan kuis.']);
+      if (isFirestorePermissionDeniedError(err)) {
+        setEditorErrors([
+          'Penyimpanan ke Firestore ditolak (permission-denied). Copy isi file firestore.rules terbaru lalu klik Publish di Firebase Console -> Firestore Database -> Rules.',
+        ]);
+      } else {
+        setEditorErrors([err instanceof Error ? err.message : 'Gagal menyimpan kuis.']);
+      }
     } finally {
       setSaving(false);
     }
@@ -214,15 +229,10 @@ export function AdminQuizPanel({ user }: { user: User }) {
     setBanner(null);
     setError(null);
     try {
-      const token = await user.getIdToken();
-      const res = await fetch(`/api/admin/quizzes/${encodeURIComponent(quiz.id)}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Gagal menghapus kuis.');
+      await adminDeleteQuizFromFirestore(quiz.id);
       if (filterQuizId === quiz.id) setFilterQuizId('all');
       if (selectedAttempt?.quizId === quiz.id) setSelectedAttempt(null);
-      setBanner(`Kuis "${quiz.title}" telah dihapus.`);
+      setBanner(`Kuis "${quiz.title}" telah dihapus permanen dari Firestore.`);
       await loadQuizzes();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal menghapus kuis.');
@@ -236,12 +246,7 @@ export function AdminQuizPanel({ user }: { user: User }) {
     setDeletingAttemptId(att.id);
     setError(null);
     try {
-      const token = await user.getIdToken();
-      const res = await fetch(`/api/admin/quiz-attempts/${encodeURIComponent(att.id)}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Gagal menghapus data nilai siswa.');
+      await adminDeleteQuizAttemptFromFirestore(att.id);
       if (selectedAttempt?.id === att.id) setSelectedAttempt(null);
       setConfirmDeleteAttemptId(null);
       setBanner(`Data nilai "${att.studentName}" (${att.studentClass}) telah dihapus.`);
@@ -262,50 +267,33 @@ export function AdminQuizPanel({ user }: { user: User }) {
     }
   };
 
-  const handleDownloadCsv = async (quizId: string) => {
-    try {
-      const token = await user.getIdToken();
-      const res = await fetch(`/api/admin/quizzes/${encodeURIComponent(quizId)}/export`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Gagal mengekspor CSV.');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `hasil-${quizId}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal mengekspor CSV.');
-    }
+  const triggerCsvDownload = (filename: string, csvContent: string) => {
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   };
 
-  const handleDownloadRecapCsv = async () => {
-    try {
-      const token = await user.getIdToken();
-      const params = new URLSearchParams();
-      if (filterQuizId !== 'all') params.set('quizId', filterQuizId);
-      if (filterClass !== 'all') params.set('studentClass', filterClass);
-      if (searchStudent.trim()) params.set('search', searchStudent.trim());
-      const res = await fetch(`/api/admin/quiz-attempts/export?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Gagal mengekspor rekap nilai CSV.');
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'rekap-nilai-kuis-siswa.csv';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal mengekspor rekap nilai CSV.');
+  const handleDownloadCsv = (quizId: string) => {
+    const quiz = quizzes.find((q) => q.id === quizId);
+    if (!quiz) {
+      setError('Data kuis tidak ditemukan untuk ekspor CSV.');
+      return;
     }
+    const attempts = allAttempts.filter((a) => a.quizId === quizId);
+    const safeSlug = quiz.id.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const csv = buildQuizAttemptsCsv(quiz, attempts);
+    triggerCsvDownload(`hasil-${safeSlug}.csv`, csv);
+  };
+
+  const handleDownloadRecapCsv = () => {
+    const csv = buildAllQuizAttemptsCsv(filteredAttempts);
+    triggerCsvDownload('rekap-nilai-kuis-siswa.csv', csv);
   };
 
   const handleCopyLink = async (quizId: string) => {
@@ -1070,32 +1058,47 @@ export function AdminQuizPanel({ user }: { user: User }) {
               </button>
             </div>
             <div className="space-y-2">
-              {selectedAttempt.gradedDetails.map((d, idx) => (
-                <div
-                  key={d.questionId}
-                  className={`p-3 rounded-xl border text-xs space-y-1 ${
-                    d.isCorrect
-                      ? 'bg-emerald-50/70 border-emerald-200'
-                      : 'bg-rose-50/70 border-rose-200'
-                  }`}
-                >
-                  <p className="font-semibold text-[#121820]">
-                    #{idx + 1}. {d.prompt}
-                  </p>
-                  {d.imageUrl && (
-                    <img
-                      src={d.imageUrl}
-                      alt={`Gambar soal ${idx + 1}`}
-                      className="max-h-36 w-auto max-w-full rounded-lg border border-[#DFDCD3] object-contain bg-white my-1.5"
-                      referrerPolicy="no-referrer"
-                    />
-                  )}
-                  <p>
-                    Jawaban siswa: <strong>{d.selectedOptionText}</strong> · Kunci:{' '}
-                    <strong>{d.correctOptionText}</strong> ({d.earnedPoints}/{d.maxPoints} poin)
-                  </p>
-                </div>
-              ))}
+              {selectedAttempt.gradedDetails.map((d, idx) => {
+                const matchedQuiz = quizzes.find((q) => q.id === selectedAttempt.quizId);
+                const matchedQuestion = matchedQuiz?.questions.find((q) => q.id === d.questionId);
+                const resolvedCorrectText =
+                  d.correctOptionText ||
+                  matchedQuestion?.options.find((o) => o.id === matchedQuestion.correctOptionId)?.text ||
+                  matchedQuestion?.correctOptionId ||
+                  '-';
+                const resolvedExplanation = d.explanation || matchedQuestion?.explanation;
+                return (
+                  <div
+                    key={d.questionId}
+                    className={`p-3 rounded-xl border text-xs space-y-1 ${
+                      d.isCorrect
+                        ? 'bg-emerald-50/70 border-emerald-200'
+                        : 'bg-rose-50/70 border-rose-200'
+                    }`}
+                  >
+                    <p className="font-semibold text-[#121820]">
+                      #{idx + 1}. {d.prompt}
+                    </p>
+                    {d.imageUrl && (
+                      <img
+                        src={d.imageUrl}
+                        alt={`Gambar soal ${idx + 1}`}
+                        className="max-h-36 w-auto max-w-full rounded-lg border border-[#DFDCD3] object-contain bg-white my-1.5"
+                        referrerPolicy="no-referrer"
+                      />
+                    )}
+                    <p>
+                      Jawaban siswa: <strong>{d.selectedOptionText}</strong> · Kunci:{' '}
+                      <strong>{resolvedCorrectText}</strong> ({d.earnedPoints}/{d.maxPoints} poin)
+                    </p>
+                    {resolvedExplanation && (
+                      <p className="text-[#3F4A59]">
+                        Pembahasan: {resolvedExplanation}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

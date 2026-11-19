@@ -18,9 +18,24 @@ export interface QuizQuestion {
   points: number;
   correctOptionId: string;
   explanation?: string;
+  answerHash?: string;
 }
 
-export type StudentSafeQuizQuestion = Omit<QuizQuestion, 'correctOptionId' | 'explanation'>;
+export type StudentSafeQuizQuestion = Omit<
+  QuizQuestion,
+  'correctOptionId' | 'explanation' | 'answerHash'
+>;
+
+export interface PublicFirestoreQuizQuestion {
+  id: string;
+  order: number;
+  type: QuizQuestionType;
+  prompt: string;
+  imageUrl?: string;
+  options: QuizOption[];
+  points: number;
+  answerHash?: string;
+}
 
 export interface QuizDefinition {
   id: string;
@@ -62,8 +77,8 @@ export interface GradedQuestionDetail {
   imageUrl?: string;
   selectedOptionId: string;
   selectedOptionText: string;
-  correctOptionId: string;
-  correctOptionText: string;
+  correctOptionId?: string;
+  correctOptionText?: string;
   isCorrect: boolean;
   earnedPoints: number;
   maxPoints: number;
@@ -240,6 +255,103 @@ export function gradeQuizSubmission(
     wrongCount,
     unansweredCount,
     gradedDetails: gradedDetails.map((d) => ({ ...d, durationSeconds } as GradedQuestionDetail)),
+  };
+}
+
+export async function computeQuestionAnswerHash(
+  quizId: string,
+  questionId: string,
+  optionId: string
+): Promise<string> {
+  const input = `${quizId.trim()}:${questionId.trim()}:${optionId.trim()}`;
+  const bytes = new TextEncoder().encode(input);
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+export async function gradeQuizByAnswerHashes(
+  quizId: string,
+  questions: Array<{
+    id: string;
+    order: number;
+    prompt: string;
+    imageUrl?: string;
+    options: QuizOption[];
+    points: number;
+    answerHash?: string;
+    correctOptionId?: string;
+    explanation?: string;
+  }>,
+  answers: Record<string, string>,
+  durationSeconds: number
+): Promise<{
+  score: number;
+  maxScore: number;
+  percentage: number;
+  correctCount: number;
+  wrongCount: number;
+  unansweredCount: number;
+  gradedDetails: GradedQuestionDetail[];
+}> {
+  const sorted = [...questions].sort((a, b) => a.order - b.order);
+  let score = 0;
+  let maxScore = 0;
+  let correctCount = 0;
+  let wrongCount = 0;
+  let unansweredCount = 0;
+
+  const gradedDetails: GradedQuestionDetail[] = [];
+
+  for (const q of sorted) {
+    const qPoints = Math.max(0, Number(q.points) || 0);
+    maxScore += qPoints;
+    const selectedId = typeof answers[q.id] === 'string' ? answers[q.id].trim() : '';
+    const selectedOpt = q.options.find((o) => o.id === selectedId);
+
+    let isCorrect = false;
+    if (selectedId) {
+      if (q.correctOptionId) {
+        isCorrect = selectedId === q.correctOptionId;
+      } else if (q.answerHash) {
+        const candidateHash = await computeQuestionAnswerHash(quizId, q.id, selectedId);
+        isCorrect = candidateHash === q.answerHash;
+      }
+    }
+
+    if (!selectedId) {
+      unansweredCount += 1;
+      wrongCount += 1;
+    } else if (isCorrect) {
+      correctCount += 1;
+      score += qPoints;
+    } else {
+      wrongCount += 1;
+    }
+
+    gradedDetails.push({
+      questionId: q.id,
+      prompt: q.prompt,
+      ...(q.imageUrl ? { imageUrl: q.imageUrl } : {}),
+      selectedOptionId: selectedId,
+      selectedOptionText: selectedOpt?.text || '(Tidak dijawab)',
+      isCorrect,
+      earnedPoints: isCorrect ? qPoints : 0,
+      maxPoints: qPoints,
+      durationSeconds,
+    } as GradedQuestionDetail);
+  }
+
+  const percentage = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
+  return {
+    score,
+    maxScore,
+    percentage,
+    correctCount,
+    wrongCount,
+    unansweredCount,
+    gradedDetails,
   };
 }
 

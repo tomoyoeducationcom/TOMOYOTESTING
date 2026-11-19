@@ -255,6 +255,66 @@ function gradeQuizSubmission(quiz, answers, durationSeconds) {
     gradedDetails: gradedDetails.map((d) => ({ ...d, durationSeconds }))
   };
 }
+async function computeQuestionAnswerHash(quizId, questionId, optionId) {
+  const input = `${quizId.trim()}:${questionId.trim()}:${optionId.trim()}`;
+  const bytes = new TextEncoder().encode(input);
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function gradeQuizByAnswerHashes(quizId, questions, answers, durationSeconds) {
+  const sorted = [...questions].sort((a, b) => a.order - b.order);
+  let score = 0;
+  let maxScore = 0;
+  let correctCount = 0;
+  let wrongCount = 0;
+  let unansweredCount = 0;
+  const gradedDetails = [];
+  for (const q of sorted) {
+    const qPoints = Math.max(0, Number(q.points) || 0);
+    maxScore += qPoints;
+    const selectedId = typeof answers[q.id] === "string" ? answers[q.id].trim() : "";
+    const selectedOpt = q.options.find((o) => o.id === selectedId);
+    let isCorrect = false;
+    if (selectedId) {
+      if (q.correctOptionId) {
+        isCorrect = selectedId === q.correctOptionId;
+      } else if (q.answerHash) {
+        const candidateHash = await computeQuestionAnswerHash(quizId, q.id, selectedId);
+        isCorrect = candidateHash === q.answerHash;
+      }
+    }
+    if (!selectedId) {
+      unansweredCount += 1;
+      wrongCount += 1;
+    } else if (isCorrect) {
+      correctCount += 1;
+      score += qPoints;
+    } else {
+      wrongCount += 1;
+    }
+    gradedDetails.push({
+      questionId: q.id,
+      prompt: q.prompt,
+      ...q.imageUrl ? { imageUrl: q.imageUrl } : {},
+      selectedOptionId: selectedId,
+      selectedOptionText: selectedOpt?.text || "(Tidak dijawab)",
+      isCorrect,
+      earnedPoints: isCorrect ? qPoints : 0,
+      maxPoints: qPoints,
+      durationSeconds
+    });
+  }
+  const percentage = maxScore > 0 ? Math.round(score / maxScore * 100) : 0;
+  return {
+    score,
+    maxScore,
+    percentage,
+    correctCount,
+    wrongCount,
+    unansweredCount,
+    gradedDetails
+  };
+}
 function validateQuizPayload(input) {
   const errors = [];
   const title = (input.title || "").trim();
@@ -1366,9 +1426,165 @@ async function processDueRemindersNow(appUrl) {
 
 // src/server/quizService.ts
 import crypto from "crypto";
+
+// src/server/quizFirestoreRest.ts
+function decodeValue(val) {
+  if (!val) return void 0;
+  if ("stringValue" in val) return val.stringValue;
+  if ("booleanValue" in val) return val.booleanValue;
+  if ("integerValue" in val) return Number(val.integerValue);
+  if ("doubleValue" in val) return Number(val.doubleValue);
+  if ("timestampValue" in val) return val.timestampValue;
+  if ("nullValue" in val) return null;
+  if ("arrayValue" in val) {
+    return (val.arrayValue?.values || []).map((v) => decodeValue(v));
+  }
+  if ("mapValue" in val) {
+    const out = {};
+    const fields = val.mapValue?.fields || {};
+    for (const [k, v] of Object.entries(fields)) {
+      out[k] = decodeValue(v);
+    }
+    return out;
+  }
+  return void 0;
+}
+function decodeQuizDoc(doc) {
+  if (!doc.name || !doc.fields) return null;
+  const id = doc.name.split("/").pop() || "";
+  if (!id) return null;
+  const decoded = {};
+  for (const [k, v] of Object.entries(doc.fields)) {
+    decoded[k] = decodeValue(v);
+  }
+  const rawQuestions = Array.isArray(decoded.questions) ? decoded.questions : [];
+  const questions = rawQuestions.map((item, idx) => {
+    const q = item && typeof item === "object" ? item : {};
+    const rawOpts = Array.isArray(q.options) ? q.options : [];
+    return {
+      id: typeof q.id === "string" && q.id ? q.id : `q_${idx + 1}`,
+      order: typeof q.order === "number" ? q.order : idx + 1,
+      type: q.type === "true_false" ? "true_false" : "multiple_choice",
+      prompt: typeof q.prompt === "string" ? q.prompt : "",
+      ...typeof q.imageUrl === "string" && q.imageUrl ? { imageUrl: q.imageUrl } : {},
+      options: rawOpts.map((opt, oIdx) => {
+        const o = opt && typeof opt === "object" ? opt : {};
+        return {
+          id: typeof o.id === "string" ? o.id : `opt_${oIdx + 1}`,
+          text: typeof o.text === "string" ? o.text : ""
+        };
+      }),
+      points: typeof q.points === "number" ? Math.max(1, q.points) : 10,
+      correctOptionId: "",
+      ...typeof q.answerHash === "string" ? { answerHash: q.answerHash } : {}
+    };
+  });
+  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+  return {
+    id,
+    title: typeof decoded.title === "string" ? decoded.title : "",
+    description: typeof decoded.description === "string" ? decoded.description : "",
+    instructions: typeof decoded.instructions === "string" ? decoded.instructions : "",
+    targetClass: typeof decoded.targetClass === "string" ? decoded.targetClass : "Semua Tingkat",
+    status: decoded.status === "published" || decoded.status === "disabled" ? decoded.status : "draft",
+    timeLimitMinutes: typeof decoded.timeLimitMinutes === "number" ? decoded.timeLimitMinutes : 0,
+    maxAttempts: typeof decoded.maxAttempts === "number" ? decoded.maxAttempts : 0,
+    ...typeof decoded.startAtIso === "string" && decoded.startAtIso ? { startAtIso: decoded.startAtIso } : {},
+    ...typeof decoded.endAtIso === "string" && decoded.endAtIso ? { endAtIso: decoded.endAtIso } : {},
+    questions,
+    createdAtIso: typeof decoded.createdAt === "string" ? decoded.createdAt : doc.createTime || nowIso,
+    updatedAtIso: typeof decoded.updatedAt === "string" ? decoded.updatedAt : doc.updateTime || nowIso
+  };
+}
+function getFirestoreBaseUrl() {
+  const projectId = firebase_applet_config_default.projectId;
+  const dbId = firebase_applet_config_default.firestoreDatabaseId || "(default)";
+  if (!projectId || projectId === "remixed-project-id") return null;
+  return `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+    projectId
+  )}/databases/${encodeURIComponent(dbId)}/documents`;
+}
+async function fetchPublishedQuizFromFirestoreRest(quizId) {
+  const baseUrl = getFirestoreBaseUrl();
+  if (!baseUrl) return null;
+  try {
+    const res = await fetch(`${baseUrl}/quizzes/${encodeURIComponent(quizId)}`, {
+      cache: "no-store"
+    });
+    if (!res.ok) return null;
+    const doc = await res.json();
+    const quiz = decodeQuizDoc(doc);
+    if (!quiz || quiz.status !== "published") return null;
+    return quiz;
+  } catch {
+    return null;
+  }
+}
+async function listPublishedQuizzesFromFirestoreRest() {
+  const baseUrl = getFirestoreBaseUrl();
+  if (!baseUrl) return [];
+  try {
+    const res = await fetch(`${baseUrl}:runQuery`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        structuredQuery: {
+          from: [{ collectionId: "quizzes" }],
+          where: {
+            fieldFilter: {
+              field: { fieldPath: "isPublished" },
+              op: "EQUAL",
+              value: { booleanValue: true }
+            }
+          }
+        }
+      }),
+      cache: "no-store"
+    });
+    if (!res.ok) return [];
+    const rows = await res.json();
+    if (!Array.isArray(rows)) return [];
+    return rows.map((r) => r.document ? decodeQuizDoc(r.document) : null).filter((q) => Boolean(q && q.status === "published")).sort((a, b) => new Date(b.updatedAtIso).getTime() - new Date(a.updatedAtIso).getTime());
+  } catch {
+    return [];
+  }
+}
+
+// src/server/quizService.ts
 var QUIZZES_FILE = "quizzes.json";
 var ATTEMPTS_FILE = "quiz-attempts.json";
-var SESSIONS_FILE = "quiz-sessions.json";
+var SUBMITTED_SESSIONS_FILE = "quiz-submitted-sessions.json";
+function getQuizSessionSecret() {
+  return process.env.QUIZ_SESSION_SECRET || process.env.FONNTE_TOKEN || `tomoyo-quiz-hmac-${firebase_applet_config_default.projectId}-${firebase_applet_config_default.apiKey}`;
+}
+function signQuizSession(payload) {
+  const encoded = Buffer.from(JSON.stringify(payload), "utf-8").toString("base64url");
+  const sig = crypto.createHmac("sha256", getQuizSessionSecret()).update(encoded).digest("base64url");
+  return `v1.${encoded}.${sig}`;
+}
+function verifyQuizSessionToken(token, expectedQuizId) {
+  if (!token || !token.startsWith("v1.")) return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  const [, encoded, sig] = parts;
+  const expectedSig = crypto.createHmac("sha256", getQuizSessionSecret()).update(encoded).digest("base64url");
+  const sigBuf = Buffer.from(sig);
+  const expBuf = Buffer.from(expectedSig);
+  if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(encoded, "base64url").toString("utf-8")
+    );
+    if (!parsed || parsed.qid !== expectedQuizId || !parsed.sn || !parsed.sc || !parsed.st) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 function loadQuizzes() {
   const loaded = readJsonData(QUIZZES_FILE, null);
   if (!loaded || !Array.isArray(loaded)) {
@@ -1385,31 +1601,49 @@ function loadAttempts() {
 function saveAttempts(attempts) {
   writeJsonData(ATTEMPTS_FILE, attempts);
 }
-function loadSessions() {
-  return readJsonData(SESSIONS_FILE, []);
+function loadSubmittedSessionIds() {
+  return readJsonData(SUBMITTED_SESSIONS_FILE, []);
 }
-function saveSessions(sessions) {
-  writeJsonData(SESSIONS_FILE, sessions.slice(-1e3));
+function markSessionSubmitted(sid) {
+  const existing = loadSubmittedSessionIds();
+  if (!existing.includes(sid)) {
+    existing.push(sid);
+    writeJsonData(SUBMITTED_SESSIONS_FILE, existing.slice(-2e3));
+  }
 }
-function listPublicQuizzes() {
-  const quizzes = loadQuizzes();
-  return quizzes.filter((q) => q.status === "published").map((q) => ({
+async function resolvePublicQuizWithSource(quizId) {
+  const firestoreQuiz = await fetchPublishedQuizFromFirestoreRest(quizId);
+  if (firestoreQuiz) {
+    return { quiz: firestoreQuiz, source: "firestore" };
+  }
+  const localFound = loadQuizzes().find((q) => q.id === quizId) || null;
+  return { quiz: localFound, source: "local" };
+}
+async function listPublicQuizzes() {
+  const firestoreQuizzes = await listPublishedQuizzesFromFirestoreRest();
+  if (firestoreQuizzes.length > 0) {
+    return firestoreQuizzes.map((q) => ({
+      ...toStudentSafeQuiz(q),
+      availability: checkQuizAvailability(q)
+    }));
+  }
+  const localQuizzes = loadQuizzes();
+  return localQuizzes.filter((q) => q.status === "published").map((q) => ({
     ...toStudentSafeQuiz(q),
     availability: checkQuizAvailability(q)
   }));
 }
-function getPublicQuizById(quizId) {
-  const quizzes = loadQuizzes();
-  const found = quizzes.find((q) => q.id === quizId);
-  if (!found || found.status !== "published") {
+async function getPublicQuizById(quizId) {
+  const { quiz } = await resolvePublicQuizWithSource(quizId);
+  if (!quiz || quiz.status !== "published") {
     return { quiz: null, availability: null };
   }
   return {
-    quiz: toStudentSafeQuiz(found),
-    availability: checkQuizAvailability(found)
+    quiz: toStudentSafeQuiz(quiz),
+    availability: checkQuizAvailability(quiz)
   };
 }
-function startStudentQuizSession(input) {
+async function startStudentQuizSession(input) {
   const studentName = input.studentName.trim();
   const studentClass = input.studentClass.trim();
   if (studentName.length < 2 || studentName.length > 120) {
@@ -1418,8 +1652,7 @@ function startStudentQuizSession(input) {
   if (studentClass.length < 1 || studentClass.length > 60) {
     return { ok: false, error: "Kelas wajib diisi." };
   }
-  const quizzes = loadQuizzes();
-  const quiz = quizzes.find((q) => q.id === input.quizId);
+  const { quiz, source } = await resolvePublicQuizWithSource(input.quizId);
   if (!quiz) {
     return { ok: false, error: "Kuis tidak ditemukan." };
   }
@@ -1427,30 +1660,31 @@ function startStudentQuizSession(input) {
   if (!avail.available) {
     return { ok: false, error: avail.reason || "Kuis belum dapat dikerjakan saat ini." };
   }
-  const attempts = loadAttempts();
-  const attemptsUsed = countMatchingAttempts(attempts, quiz.id, studentName, studentClass);
-  if (quiz.maxAttempts > 0 && attemptsUsed >= quiz.maxAttempts) {
-    return {
-      ok: false,
-      error: `Batas maksimal pengerjaan (${quiz.maxAttempts} kali) untuk ${studentName} (${studentClass}) telah tercapai.`
-    };
+  let attemptsUsed = 0;
+  if (source === "local") {
+    const attempts = loadAttempts();
+    attemptsUsed = countMatchingAttempts(attempts, quiz.id, studentName, studentClass);
+    if (quiz.maxAttempts > 0 && attemptsUsed >= quiz.maxAttempts) {
+      return {
+        ok: false,
+        error: `Batas maksimal pengerjaan (${quiz.maxAttempts} kali) untuk ${studentName} (${studentClass}) telah tercapai.`
+      };
+    }
   }
   const now = /* @__PURE__ */ new Date();
   const startedAtIso = now.toISOString();
   const deadlineIso = quiz.timeLimitMinutes > 0 ? new Date(now.getTime() + quiz.timeLimitMinutes * 60 * 1e3).toISOString() : void 0;
-  const sessionToken = crypto.randomUUID();
-  const sessions = loadSessions();
-  sessions.push({
-    sessionToken,
-    quizId: quiz.id,
-    studentName,
-    studentClass,
-    parentWhatsapp: input.parentWhatsapp?.trim() ? normalizeWhatsappPhone(input.parentWhatsapp.trim()) : void 0,
-    startedAtIso,
-    deadlineIso,
-    submitted: false
+  const sid = crypto.randomBytes(8).toString("hex");
+  const normalizedParentWa = input.parentWhatsapp?.trim() ? normalizeWhatsappPhone(input.parentWhatsapp.trim()) : void 0;
+  const sessionToken = signQuizSession({
+    sid,
+    qid: quiz.id,
+    sn: studentName,
+    sc: studentClass,
+    ...normalizedParentWa ? { pw: normalizedParentWa } : {},
+    st: startedAtIso,
+    ...deadlineIso ? { dl: deadlineIso } : {}
   });
-  saveSessions(sessions);
   return {
     ok: true,
     sessionToken,
@@ -1460,9 +1694,8 @@ function startStudentQuizSession(input) {
     quiz: toStudentSafeQuiz(quiz)
   };
 }
-function submitStudentQuizAttempt(input) {
-  const quizzes = loadQuizzes();
-  const quiz = quizzes.find((q) => q.id === input.quizId);
+async function submitStudentQuizAttempt(input) {
+  const { quiz, source } = await resolvePublicQuizWithSource(input.quizId);
   if (!quiz) {
     return { ok: false, error: "Kuis tidak ditemukan." };
   }
@@ -1470,17 +1703,19 @@ function submitStudentQuizAttempt(input) {
   if (!avail.available) {
     return { ok: false, error: avail.reason || "Kuis sudah tidak menerima jawaban." };
   }
-  const sessions = loadSessions();
-  const sessionIdx = input.sessionToken ? sessions.findIndex((s) => s.sessionToken === input.sessionToken && s.quizId === quiz.id) : -1;
-  if (sessionIdx < 0) {
+  const session = input.sessionToken ? verifyQuizSessionToken(input.sessionToken, quiz.id) : null;
+  if (!session) {
     return { ok: false, error: "Sesi pengerjaan kuis tidak valid atau sudah kedaluwarsa." };
   }
-  const session = sessions[sessionIdx];
-  if (session.submitted) {
+  const submittedIds = loadSubmittedSessionIds();
+  if (submittedIds.includes(session.sid)) {
     return { ok: false, error: "Jawaban pada sesi ini sudah pernah dikirim sebelumnya." };
   }
   const nowMs = Date.now();
-  const startedMs = new Date(session.startedAtIso).getTime();
+  const startedMs = new Date(session.st).getTime();
+  if (Number.isNaN(startedMs)) {
+    return { ok: false, error: "Waktu mulai sesi kuis tidak valid." };
+  }
   const durationSeconds = Math.max(1, Math.round((nowMs - startedMs) / 1e3));
   if (quiz.timeLimitMinutes > 0) {
     const allowedSec = quiz.timeLimitMinutes * 60 + 20;
@@ -1491,29 +1726,29 @@ function submitStudentQuizAttempt(input) {
       };
     }
   }
-  const attempts = loadAttempts();
-  const attemptsUsed = countMatchingAttempts(
-    attempts,
-    quiz.id,
-    session.studentName,
-    session.studentClass
-  );
-  if (quiz.maxAttempts > 0 && attemptsUsed >= quiz.maxAttempts) {
-    return {
-      ok: false,
-      error: `Batas maksimal percobaan (${quiz.maxAttempts}x) telah tercapai.`
-    };
+  if (source === "local") {
+    const attempts = loadAttempts();
+    const attemptsUsed = countMatchingAttempts(attempts, quiz.id, session.sn, session.sc);
+    if (quiz.maxAttempts > 0 && attemptsUsed >= quiz.maxAttempts) {
+      return {
+        ok: false,
+        error: `Batas maksimal percobaan (${quiz.maxAttempts}x) telah tercapai.`
+      };
+    }
   }
-  const graded = gradeQuizSubmission(quiz, input.answers || {}, durationSeconds);
+  const hasPlainKeys = quiz.questions.every(
+    (q) => typeof q.correctOptionId === "string" && q.correctOptionId.trim().length > 0
+  );
+  const graded = hasPlainKeys ? gradeQuizSubmission(quiz, input.answers || {}, durationSeconds) : await gradeQuizByAnswerHashes(quiz.id, quiz.questions, input.answers || {}, durationSeconds);
   const submittedAtIso = (/* @__PURE__ */ new Date()).toISOString();
-  const attemptId = `att_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+  const attemptId = `att_${session.sid}`;
   const record = {
     id: attemptId,
     quizId: quiz.id,
     quizTitle: quiz.title,
-    studentName: session.studentName,
-    studentClass: session.studentClass,
-    parentWhatsapp: session.parentWhatsapp,
+    studentName: session.sn,
+    studentClass: session.sc,
+    ...session.pw ? { parentWhatsapp: session.pw } : {},
     answers: input.answers || {},
     score: graded.score,
     maxScore: graded.maxScore,
@@ -1522,14 +1757,16 @@ function submitStudentQuizAttempt(input) {
     wrongCount: graded.wrongCount,
     unansweredCount: graded.unansweredCount,
     durationSeconds,
-    startedAtIso: session.startedAtIso,
+    startedAtIso: session.st,
     submittedAtIso,
     gradedDetails: graded.gradedDetails
   };
-  attempts.unshift(record);
-  saveAttempts(attempts);
-  sessions[sessionIdx] = { ...session, submitted: true };
-  saveSessions(sessions);
+  if (source === "local") {
+    const attempts = loadAttempts();
+    attempts.unshift(record);
+    saveAttempts(attempts);
+  }
+  markSessionSubmitted(session.sid);
   return {
     ok: true,
     result: {
@@ -1545,7 +1782,8 @@ function submitStudentQuizAttempt(input) {
       unansweredCount: record.unansweredCount,
       durationSeconds: record.durationSeconds,
       submittedAtIso: record.submittedAtIso
-    }
+    },
+    attemptRecord: record
   };
 }
 function listAdminQuizzes() {
@@ -1612,11 +1850,6 @@ function deleteAdminQuiz(quizId) {
   const nextAttempts = attempts.filter((a) => a.quizId !== quizId);
   if (nextAttempts.length !== attempts.length) {
     saveAttempts(nextAttempts);
-  }
-  const sessions = loadSessions();
-  const nextSessions = sessions.filter((s) => s.quizId !== quizId);
-  if (nextSessions.length !== sessions.length) {
-    saveSessions(nextSessions);
   }
   return true;
 }
@@ -2413,22 +2646,22 @@ function createApp() {
     const status = await checkFonnteDeviceStatus();
     res.json(status);
   });
-  app2.get("/api/quizzes", (_req, res) => {
+  app2.get("/api/quizzes", async (_req, res) => {
     res.setHeader("Cache-Control", "no-store");
-    res.json({ quizzes: listPublicQuizzes() });
+    res.json({ quizzes: await listPublicQuizzes() });
   });
-  app2.get("/api/quizzes/:quizId", (req, res) => {
+  app2.get("/api/quizzes/:quizId", async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
-    const data = getPublicQuizById(req.params.quizId);
+    const data = await getPublicQuizById(req.params.quizId);
     if (!data.quiz) {
       res.status(404).json({ error: "Kuis tidak ditemukan atau belum diterbitkan." });
       return;
     }
     res.json(data);
   });
-  app2.post("/api/quizzes/:quizId/start", (req, res) => {
+  app2.post("/api/quizzes/:quizId/start", async (req, res) => {
     const body = req.body || {};
-    const started = startStudentQuizSession({
+    const started = await startStudentQuizSession({
       quizId: req.params.quizId,
       studentName: typeof body.studentName === "string" ? body.studentName : "",
       studentClass: typeof body.studentClass === "string" ? body.studentClass : "",
@@ -2440,9 +2673,9 @@ function createApp() {
     }
     res.json(started);
   });
-  app2.post("/api/quizzes/:quizId/submit", (req, res) => {
+  app2.post("/api/quizzes/:quizId/submit", async (req, res) => {
     const body = req.body || {};
-    const outcome = submitStudentQuizAttempt({
+    const outcome = await submitStudentQuizAttempt({
       quizId: req.params.quizId,
       sessionToken: body.sessionToken,
       studentName: typeof body.studentName === "string" ? body.studentName : "",
@@ -2455,6 +2688,45 @@ function createApp() {
       return;
     }
     res.json(outcome);
+  });
+  app2.post("/api/admin/quizzes/:quizId/notify", async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: "Khusus admin terotorisasi." });
+      return;
+    }
+    const body = req.body || {};
+    const notifyTarget = typeof body.notifyTarget === "string" ? body.notifyTarget.trim() : "";
+    const title = typeof body.title === "string" ? body.title.trim() : "";
+    const targetClass = typeof body.targetClass === "string" ? body.targetClass.trim() : "Semua Tingkat";
+    if (!notifyTarget || !title) {
+      res.status(400).json({ error: "Target WhatsApp dan judul kuis wajib diisi." });
+      return;
+    }
+    const settings = getWaSettings();
+    let autoDispatch = null;
+    if (settings.autoNotifyQuizPublished) {
+      const templates = listWaTemplates();
+      const tpl = templates.find((t) => t.id === settings.autoQuizTemplateId);
+      const baseUrl = resolveBaseUrl(req);
+      const quizUrl = `${baseUrl}/kuis/${req.params.quizId}`;
+      const rawMsg = tpl?.content || `Kuis Online baru tersedia: *${title}* (${targetClass}). Kerjakan di ${quizUrl}`;
+      const rendered = renderTemplateVariables(rawMsg, {
+        nama_siswa: "Siswa-siswi TOMOYO",
+        nama_orang_tua: "Bapak/Ibu",
+        kelas: targetClass,
+        nama_program: title,
+        jadwal: quizUrl
+      });
+      const target = notifyTarget.endsWith("@g.us") ? notifyTarget : normalizeWhatsappPhone(notifyTarget);
+      if (target) {
+        autoDispatch = await sendFonnteWhatsApp({
+          target,
+          message: rendered.rendered
+        });
+      }
+    }
+    res.json({ ok: true, autoDispatch });
   });
   app2.get("/api/admin/quizzes", async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
