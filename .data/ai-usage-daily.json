@@ -1,0 +1,15 @@
+{
+  "2026-11-19": {
+    "dateKey": "2026-11-19",
+    "totalRequests": 3,
+    "publicRequests": 2,
+    "adminRequests": 1,
+    "failedRequests": 3,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "estimatedCostUsd": 0,
+    "sessionCount": 3,
+    "model": "gpt-4o-mini",
+    "updatedAtIso": "2026-11-19T13:39:14.541Z"
+  }
+}

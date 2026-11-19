@@ -3,6 +3,7 @@ import {
   AlertCircle,
   BellRing,
   BookOpen,
+  Bot,
   CalendarClock,
   Check,
   CheckCircle2,
@@ -84,6 +85,7 @@ import { AdminCmsPanel } from '../components/AdminCmsPanel';
 import { AdminQuizPanel } from '../components/AdminQuizPanel';
 import { AdminWaGroupPanel } from '../components/AdminWaGroupPanel';
 import { AdminWaCenterPanel } from '../components/AdminWaCenterPanel';
+import { AdminAiPanel } from '../components/AdminAiPanel';
 
 type AdminTab =
   | 'overview'
@@ -93,6 +95,7 @@ type AdminTab =
   | 'quizzes'
   | 'wagroup'
   | 'wacenter'
+  | 'ai'
   | 'cms'
   | 'payments'
   | 'reports'
@@ -1023,6 +1026,7 @@ export function AdminDashboardPage() {
             { id: 'quizzes', label: 'Kuis Online', icon: BookOpen },
             { id: 'wagroup', label: 'WhatsApp Group', icon: Users },
             { id: 'wacenter', label: 'WhatsApp Center', icon: Radio },
+            { id: 'ai', label: 'TOMOYO AI', icon: Bot },
             { id: 'cms', label: 'CMS Website', icon: Settings },
             { id: 'payments', label: 'Pembayaran', icon: CreditCard },
             { id: 'reports', label: 'Laporan & Ekspor PDF', icon: FileText },
@@ -1083,6 +1087,7 @@ export function AdminDashboardPage() {
               {activeTab === 'quizzes' && 'Manajemen Kuis Online Siswa'}
               {activeTab === 'wagroup' && 'WhatsApp Group Resmi (Fonnte)'}
               {activeTab === 'wacenter' && 'WhatsApp Center & Siaran Pesan'}
+              {activeTab === 'ai' && 'TOMOYO AI — Manajemen Asisten Virtual'}
               {activeTab === 'cms' && 'CMS Konten Website'}
               {activeTab === 'payments' && 'Catatan Pembayaran Manual'}
               {activeTab === 'reports' && 'Pusat Ekspor PDF & Invoice'}
@@ -3534,6 +3539,9 @@ export function AdminDashboardPage() {
                 packages={bundle?.packages || []}
               />
             )}
+
+            {/* TOMOYO AI TAB */}
+            {activeTab === 'ai' && <AdminAiPanel user={user} />}
           </>
         )}
       </main>

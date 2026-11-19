@@ -24,3 +24,11 @@
 10. **CMS Tampering by Parent**: Authenticated parent attempts to update `/packages/paket-1` or `/siteContent/founder`. -> Expected: `PERMISSION_DENIED`.
 11. **Quiz Answer Key Leakage**: Unauthenticated student or authenticated parent attempts `get` or `list` on `/quizKeys/{quizId}`, `get`/`list`/`delete` on `/quizAttempts/{attemptId}`, or `create` on `/quizAttempts/{attemptId}` referencing a draft/non-existent quiz. -> Expected: `PERMISSION_DENIED`.
 12. **WhatsApp Center Tampering**: Non-admin user attempts to read `/waCampaigns/{id}`, `/waTemplates/{id}`, `/waSettings/{id}`, or `/waOptOuts/{id}`. -> Expected: `PERMISSION_DENIED`.
+13. **AI Knowledge & Instructions Isolation**: Non-admin user attempts to read inactive `/aiKnowledge/{id}` (`isActive == false`), write to `/aiKnowledge/{id}`, read/write `/aiInstructions/{docId}`, write `/aiSettings/{docId}`, or read/write `/aiUsageDaily/{dateKey}`. -> Expected: `PERMISSION_DENIED`.
+14. **AI API Key & Transcript Protection**: `/aiSettings`, `/aiInstructions`, `/aiKnowledge`, and `/aiUsageDaily` strictly prohibit shadow fields (e.g., `apiKey`, `openAiKey`, `transcript`, `messages`) via `keys().hasOnly(...)`.
+
+## 3. TOMOYO ASISTEN Data Invariants
+10. **AI Knowledge Center (`/aiKnowledge/{itemId}`)**: Active items (`isActive == true`) are publicly readable for grounding; inactive items and all mutations (`create`, `update`, `delete`) are strictly Admin-only.
+11. **AI Instructions (`/aiInstructions/{docId}`)**: Strictly Admin-only read/write; developer core security rules are enforced server-side and cannot be overridden by Firestore documents.
+12. **AI Chatbot Settings (`/aiSettings/{docId}`)**: Public read allowed ONLY for `/aiSettings/chatbot` (non-secret display & rate-limit settings); all other docs and all writes are strictly Admin-only.
+13. **AI Usage Analytics (`/aiUsageDaily/{dateKey}`)**: Strictly Admin-only read/write containing aggregate counts/token totals only (never visitor transcripts or prompts).

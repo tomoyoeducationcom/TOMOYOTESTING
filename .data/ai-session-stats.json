@@ -1,0 +1,35 @@
+[
+  {
+    "sessionIdHash": "94ef1f0bad75",
+    "mode": "admin",
+    "startedAtIso": "2026-11-19T13:39:14.541Z",
+    "lastActiveAtIso": "2026-11-19T13:39:14.541Z",
+    "turnCount": 0,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "estimatedCostUsd": 0,
+    "failedCount": 1
+  },
+  {
+    "sessionIdHash": "84452d322a81",
+    "mode": "public",
+    "startedAtIso": "2026-11-19T13:38:54.618Z",
+    "lastActiveAtIso": "2026-11-19T13:38:54.618Z",
+    "turnCount": 0,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "estimatedCostUsd": 0,
+    "failedCount": 1
+  },
+  {
+    "sessionIdHash": "64b1f2a3480c",
+    "mode": "public",
+    "startedAtIso": "2026-11-19T13:38:47.457Z",
+    "lastActiveAtIso": "2026-11-19T13:38:47.457Z",
+    "turnCount": 0,
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "estimatedCostUsd": 0,
+    "failedCount": 1
+  }
+]

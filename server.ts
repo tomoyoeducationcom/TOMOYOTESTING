@@ -21,10 +21,25 @@ import {
   injectSeoIntoHtml,
 } from './src/lib/seo';
 import {
+  extractBearerToken,
   isDecodedTokenAdmin,
   verifyRequestFirebaseToken,
   verifyRequestFirebaseTokenDetailed,
 } from './src/server/auth';
+import {
+  addKnowledgeCategory,
+  createOrUpdateKnowledgeItem,
+  getAdminAiAnalytics,
+  getAdminAiOverview,
+  getAdminKnowledgeList,
+  getAiInstructions,
+  getAiSettings,
+  getPublicAiSettings,
+  processChatbotMessage,
+  removeKnowledgeItem,
+  updateAiInstructions,
+  updateAiSettings,
+} from './src/server/aiService';
 import {
   checkFonnteDeviceStatus,
   confirmDueReminder,
@@ -1017,6 +1032,245 @@ export function createApp() {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
     res.send(exported.csv);
+  });
+
+  // ============================================================================
+  // TOMOYO ASISTEN (AI ASSISTANT) PUBLIC & ADMIN ROUTES
+  // ============================================================================
+
+  app.get('/api/ai/settings', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const settings = await getPublicAiSettings();
+      res.json(settings);
+    } catch {
+      res.status(500).json({ error: 'Gagal memuat konfigurasi TOMOYO ASISTEN.' });
+    }
+  });
+
+  const handleAiChatRequest = async (req: express.Request, res: express.Response) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const decoded = await verifyRequestFirebaseToken(req);
+    const verifiedAdmin = Boolean(decoded && isDecodedTokenAdmin(decoded));
+    const adminIdToken = verifiedAdmin ? extractBearerToken(req) || undefined : undefined;
+
+    const body = (req.body || {}) as {
+      sessionId?: unknown;
+      message?: unknown;
+      history?: unknown;
+      mode?: unknown;
+    };
+
+    // Admin can explicitly test public mode via mode: 'public'; non-admin can NEVER escalate to admin.
+    const isAdmin = verifiedAdmin && body.mode !== 'public';
+
+    const sessionId =
+      typeof body.sessionId === 'string' && body.sessionId.trim()
+        ? body.sessionId.trim().slice(0, 80)
+        : `sess_${Date.now()}`;
+    const message = typeof body.message === 'string' ? body.message : '';
+    const history = Array.isArray(body.history)
+      ? body.history
+          .filter(
+            (item): item is { role: 'user' | 'assistant'; content: string } =>
+              Boolean(item) &&
+              typeof item === 'object' &&
+              ((item as { role?: unknown }).role === 'user' ||
+                (item as { role?: unknown }).role === 'assistant') &&
+              typeof (item as { content?: unknown }).content === 'string'
+          )
+          .slice(-12)
+      : [];
+
+    const forwardedFor = req.headers['x-forwarded-for'];
+    const clientIp =
+      (Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor || '')
+        .split(',')[0]
+        .trim() ||
+      req.ip ||
+      'unknown';
+
+    const result = await processChatbotMessage({
+      sessionId,
+      clientIp,
+      message,
+      history,
+      isAdmin,
+      adminIdToken,
+    });
+
+    res.status(result.statusCode).json(result);
+  };
+
+  app.post('/api/ai/chat', handleAiChatRequest);
+  app.post('/api/responses', handleAiChatRequest);
+
+  app.get('/api/admin/ai/overview', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const idToken = extractBearerToken(req) || undefined;
+    const overview = await getAdminAiOverview(idToken);
+    res.json(overview);
+  });
+
+  app.get('/api/admin/ai/knowledge', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const idToken = extractBearerToken(req) || undefined;
+    const data = await getAdminKnowledgeList(idToken);
+    res.json(data);
+  });
+
+  app.post('/api/admin/ai/knowledge', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const idToken = extractBearerToken(req) || undefined;
+    const body = (req.body || {}) as {
+      id?: string;
+      title?: unknown;
+      category?: unknown;
+      content?: unknown;
+      isActive?: unknown;
+    };
+    const saved = await createOrUpdateKnowledgeItem({
+      id: typeof body.id === 'string' ? body.id : undefined,
+      title: body.title,
+      category: body.category,
+      content: body.content,
+      isActive: body.isActive,
+      idToken,
+    });
+    if (!saved.ok) {
+      res.status(400).json({ error: saved.errors?.join(' ') || 'Data materi tidak valid.', errors: saved.errors });
+      return;
+    }
+    res.json({ ok: true, item: saved.item, categories: saved.categories });
+  });
+
+  app.post('/api/admin/ai/knowledge/categories', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    if (name.length < 2 || name.length > 80) {
+      res.status(400).json({ error: 'Nama kategori wajib 2–80 karakter.' });
+      return;
+    }
+    const categories = addKnowledgeCategory(name);
+    res.json({ ok: true, categories });
+  });
+
+  app.put('/api/admin/ai/knowledge/:id', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const idToken = extractBearerToken(req) || undefined;
+    const body = (req.body || {}) as {
+      title?: unknown;
+      category?: unknown;
+      content?: unknown;
+      isActive?: unknown;
+    };
+    const saved = await createOrUpdateKnowledgeItem({
+      id: req.params.id,
+      title: body.title,
+      category: body.category,
+      content: body.content,
+      isActive: body.isActive,
+      idToken,
+    });
+    if (!saved.ok) {
+      res.status(400).json({ error: saved.errors?.join(' ') || 'Data materi tidak valid.', errors: saved.errors });
+      return;
+    }
+    res.json({ ok: true, item: saved.item, categories: saved.categories });
+  });
+
+  app.delete('/api/admin/ai/knowledge/:id', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const idToken = extractBearerToken(req) || undefined;
+    const removed = await removeKnowledgeItem({ id: req.params.id, idToken });
+    if (!removed.ok) {
+      res.status(404).json({ error: 'Materi Knowledge Center tidak ditemukan.' });
+      return;
+    }
+    res.json({ ok: true });
+  });
+
+  app.get('/api/admin/ai/instructions', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const idToken = extractBearerToken(req) || undefined;
+    const instructions = await getAiInstructions(idToken);
+    res.json({ instructions });
+  });
+
+  app.put('/api/admin/ai/instructions', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const idToken = extractBearerToken(req) || undefined;
+    const instructions = await updateAiInstructions(req.body || {}, idToken);
+    res.json({ ok: true, instructions });
+  });
+
+  app.get('/api/admin/ai/settings', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const settings = await getAiSettings(true);
+    res.json({ settings });
+  });
+
+  app.put('/api/admin/ai/settings', async (req, res) => {
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const idToken = extractBearerToken(req) || undefined;
+    const settings = await updateAiSettings(req.body || {}, idToken);
+    res.json({ ok: true, settings });
+  });
+
+  app.get('/api/admin/ai/analytics', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const decoded = await verifyRequestFirebaseToken(req);
+    if (!decoded || !isDecodedTokenAdmin(decoded)) {
+      res.status(403).json({ error: 'Khusus admin terotorisasi.' });
+      return;
+    }
+    const period = typeof req.query.period === 'string' ? req.query.period : '30d';
+    const analytics = await getAdminAiAnalytics(period);
+    res.json(analytics);
   });
 
   return app;

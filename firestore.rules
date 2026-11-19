@@ -340,6 +340,85 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidAiKnowledge(data) {
+      return data.keys().hasAll(['title', 'category', 'content', 'isActive', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['title', 'category', 'content', 'isActive', 'createdAt', 'updatedAt'])
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 180
+        && data.category is string && data.category.size() >= 1 && data.category.size() <= 80
+        && data.content is string && data.content.size() >= 1 && data.content.size() <= 6000
+        && data.isActive is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAiInstruction(data) {
+      return data.keys().hasAll(['character', 'languageStyle', 'updatedAt'])
+        && data.keys().hasOnly(['character', 'languageStyle', 'extraRules', 'answerBounds', 'unavailableBehavior', 'updatedAt'])
+        && data.character is string && data.character.size() >= 1 && data.character.size() <= 600
+        && data.languageStyle is string && data.languageStyle.size() >= 1 && data.languageStyle.size() <= 600
+        && (!('extraRules' in data) || (data.extraRules is string && data.extraRules.size() <= 2000))
+        && (!('answerBounds' in data) || (data.answerBounds is string && data.answerBounds.size() <= 1500))
+        && (!('unavailableBehavior' in data) || (data.unavailableBehavior is string && data.unavailableBehavior.size() <= 1000))
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAiSetting(data) {
+      return data.keys().hasAll([
+          'enabled', 'botName', 'welcomeMessage', 'suggestedQuestions',
+          'adminWhatsapp', 'publicEnabled', 'adminEnabled', 'allowPublicStudentCount',
+          'maxRequestsPerSession', 'maxInputLength', 'maxOutputTokens',
+          'dailyRequestLimit', 'monthlyRequestLimit', 'model', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'enabled', 'botName', 'tagline', 'description', 'welcomeMessage', 'suggestedQuestions',
+          'adminWhatsapp', 'publicEnabled', 'adminEnabled', 'allowPublicStudentCount',
+          'maxRequestsPerSession', 'maxInputLength', 'maxOutputTokens',
+          'dailyRequestLimit', 'monthlyRequestLimit', 'model', 'updatedAt'
+        ])
+        && data.enabled is bool
+        && data.botName is string && data.botName.size() >= 1 && data.botName.size() <= 80
+        && (!('tagline' in data) || (data.tagline is string && data.tagline.size() <= 120))
+        && (!('description' in data) || (data.description is string && data.description.size() <= 300))
+        && data.welcomeMessage is string && data.welcomeMessage.size() >= 1 && data.welcomeMessage.size() <= 1000
+        && data.suggestedQuestions is list && data.suggestedQuestions.size() <= 8
+        && (data.suggestedQuestions.size() == 0 || data.suggestedQuestions[0] is string)
+        && data.adminWhatsapp is string && data.adminWhatsapp.size() >= 8 && data.adminWhatsapp.size() <= 30
+        && data.publicEnabled is bool
+        && data.adminEnabled is bool
+        && data.allowPublicStudentCount is bool
+        && data.maxRequestsPerSession is number && data.maxRequestsPerSession >= 1 && data.maxRequestsPerSession <= 100
+        && data.maxInputLength is number && data.maxInputLength >= 50 && data.maxInputLength <= 2000
+        && data.maxOutputTokens is number && data.maxOutputTokens >= 100 && data.maxOutputTokens <= 4000
+        && data.dailyRequestLimit is number && data.dailyRequestLimit >= 1 && data.dailyRequestLimit <= 10000
+        && data.monthlyRequestLimit is number && data.monthlyRequestLimit >= 1 && data.monthlyRequestLimit <= 200000
+        && data.model is string && data.model.size() >= 1 && data.model.size() <= 80
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAiUsageDaily(data) {
+      return data.keys().hasAll([
+          'dateKey', 'totalRequests', 'publicRequests', 'adminRequests',
+          'failedRequests', 'inputTokens', 'outputTokens', 'estimatedCostUsd',
+          'sessionCount', 'model', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'dateKey', 'totalRequests', 'publicRequests', 'adminRequests',
+          'failedRequests', 'inputTokens', 'outputTokens', 'estimatedCostUsd',
+          'sessionCount', 'model', 'updatedAt'
+        ])
+        && data.dateKey is string && data.dateKey.size() == 10
+        && data.totalRequests is number && data.totalRequests >= 0
+        && data.publicRequests is number && data.publicRequests >= 0
+        && data.adminRequests is number && data.adminRequests >= 0
+        && data.failedRequests is number && data.failedRequests >= 0
+        && data.inputTokens is number && data.inputTokens >= 0
+        && data.outputTokens is number && data.outputTokens >= 0
+        && data.estimatedCostUsd is number && data.estimatedCostUsd >= 0
+        && data.sessionCount is number && data.sessionCount >= 0
+        && data.model is string && data.model.size() >= 1 && data.model.size() <= 80
+        && data.updatedAt is timestamp;
+    }
+
     // Connection test doc
     match /test/{docId} {
       allow get: if docId == 'connection';
@@ -596,6 +675,57 @@ service cloud.firestore {
       allow update: if isValidId(settingId) && isAdmin() && isValidWaSetting(incoming()) && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly(['settingKey', 'delaySeconds', 'batchSize', 'maxRetries', 'updatedAt']);
       allow delete: if isValidId(settingId) && isAdmin();
+    }
+
+    // TOMOYO ASISTEN Knowledge Center (Active items public read for grounding, Admin write)
+    match /aiKnowledge/{itemId} {
+      allow get: if isValidId(itemId) && (resource == null || existing().isActive == true || isAdmin());
+      allow list: if isAdmin() || existing().isActive == true;
+      allow create: if isValidId(itemId) && isAdmin() && isValidAiKnowledge(incoming())
+        && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+      allow update: if isValidId(itemId) && isAdmin() && isValidAiKnowledge(incoming())
+        && incoming().createdAt == existing().createdAt && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'category', 'content', 'isActive', 'updatedAt']);
+      allow delete: if isValidId(itemId) && isAdmin();
+    }
+
+    // TOMOYO ASISTEN Instructions (Strictly Admin-only)
+    match /aiInstructions/{docId} {
+      allow get: if isValidId(docId) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(docId) && isAdmin() && isValidAiInstruction(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(docId) && isAdmin() && isValidAiInstruction(incoming()) && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['character', 'languageStyle', 'extraRules', 'answerBounds', 'unavailableBehavior', 'updatedAt']);
+      allow delete: if isValidId(docId) && isAdmin();
+    }
+
+    // TOMOYO ASISTEN Settings (Non-secret chatbot doc readable publicly, Admin write only)
+    match /aiSettings/{docId} {
+      allow get: if isValidId(docId) && (docId == 'chatbot' || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isValidId(docId) && isAdmin() && isValidAiSetting(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(docId) && isAdmin() && isValidAiSetting(incoming()) && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'enabled', 'botName', 'tagline', 'description', 'welcomeMessage', 'suggestedQuestions',
+          'adminWhatsapp', 'publicEnabled', 'adminEnabled', 'allowPublicStudentCount',
+          'maxRequestsPerSession', 'maxInputLength', 'maxOutputTokens',
+          'dailyRequestLimit', 'monthlyRequestLimit', 'model', 'updatedAt'
+        ]);
+      allow delete: if isValidId(docId) && isAdmin();
+    }
+
+    // TOMOYO ASISTEN Usage Analytics (Strictly Admin-only, zero visitor transcripts)
+    match /aiUsageDaily/{dateKey} {
+      allow get: if isValidId(dateKey) && isAdmin();
+      allow list: if isAdmin();
+      allow create: if isValidId(dateKey) && isAdmin() && isValidAiUsageDaily(incoming()) && incoming().updatedAt == request.time;
+      allow update: if isValidId(dateKey) && isAdmin() && isValidAiUsageDaily(incoming()) && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'dateKey', 'totalRequests', 'publicRequests', 'adminRequests',
+          'failedRequests', 'inputTokens', 'outputTokens', 'estimatedCostUsd',
+          'sessionCount', 'model', 'updatedAt'
+        ]);
+      allow delete: if isValidId(dateKey) && isAdmin();
     }
   }
 }

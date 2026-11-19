@@ -340,6 +340,106 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["settingKey", "delaySeconds", "batchSize", "maxRetries", "updatedAt"]
+    },
+    "AiKnowledgeItem": {
+      "title": "AiKnowledgeItem",
+      "description": "Official institutional knowledge base entry managed by Admin for TOMOYO ASISTEN.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 180 },
+        "category": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "content": { "type": "string", "minLength": 1, "maxLength": 6000 },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "category", "content", "isActive", "createdAt", "updatedAt"]
+    },
+    "AiInstructionConfig": {
+      "title": "AiInstructionConfig",
+      "description": "Admin-configurable behavior instructions for TOMOYO ASISTEN (additive only; never overrides developer security rules).",
+      "type": "object",
+      "properties": {
+        "character": { "type": "string", "minLength": 1, "maxLength": 600 },
+        "languageStyle": { "type": "string", "minLength": 1, "maxLength": 600 },
+        "extraRules": { "type": "string", "maxLength": 2000 },
+        "answerBounds": { "type": "string", "maxLength": 1500 },
+        "unavailableBehavior": { "type": "string", "maxLength": 1000 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["character", "languageStyle", "updatedAt"]
+    },
+    "AiChatbotSetting": {
+      "title": "AiChatbotSetting",
+      "description": "Publicly readable non-secret configuration for TOMOYO ASISTEN widget and rate limits (never stores API keys).",
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "botName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "tagline": { "type": "string", "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 300 },
+        "welcomeMessage": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "suggestedQuestions": { "type": "array" },
+        "adminWhatsapp": { "type": "string", "minLength": 8, "maxLength": 30 },
+        "publicEnabled": { "type": "boolean" },
+        "adminEnabled": { "type": "boolean" },
+        "allowPublicStudentCount": { "type": "boolean" },
+        "maxRequestsPerSession": { "type": "number" },
+        "maxInputLength": { "type": "number" },
+        "maxOutputTokens": { "type": "number" },
+        "dailyRequestLimit": { "type": "number" },
+        "monthlyRequestLimit": { "type": "number" },
+        "model": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "enabled",
+        "botName",
+        "welcomeMessage",
+        "suggestedQuestions",
+        "adminWhatsapp",
+        "publicEnabled",
+        "adminEnabled",
+        "allowPublicStudentCount",
+        "maxRequestsPerSession",
+        "maxInputLength",
+        "maxOutputTokens",
+        "dailyRequestLimit",
+        "monthlyRequestLimit",
+        "model",
+        "updatedAt"
+      ]
+    },
+    "AiUsageDaily": {
+      "title": "AiUsageDaily",
+      "description": "Admin-only aggregate daily OpenAI API usage metrics (zero visitor transcripts stored).",
+      "type": "object",
+      "properties": {
+        "dateKey": { "type": "string", "minLength": 10, "maxLength": 10 },
+        "totalRequests": { "type": "number" },
+        "publicRequests": { "type": "number" },
+        "adminRequests": { "type": "number" },
+        "failedRequests": { "type": "number" },
+        "inputTokens": { "type": "number" },
+        "outputTokens": { "type": "number" },
+        "estimatedCostUsd": { "type": "number" },
+        "sessionCount": { "type": "number" },
+        "model": { "type": "string", "maxLength": 80 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "dateKey",
+        "totalRequests",
+        "publicRequests",
+        "adminRequests",
+        "failedRequests",
+        "inputTokens",
+        "outputTokens",
+        "estimatedCostUsd",
+        "sessionCount",
+        "model",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -414,6 +514,22 @@
     "/waSettings/{settingId}": {
       "schema": { "$ref": "#/entities/WaSetting" },
       "description": "Admin-only WhatsApp Center queue and automation settings."
+    },
+    "/aiKnowledge/{itemId}": {
+      "schema": { "$ref": "#/entities/AiKnowledgeItem" },
+      "description": "Official AI Knowledge Center articles (active articles publicly readable for grounding; admin writes only)."
+    },
+    "/aiInstructions/{docId}": {
+      "schema": { "$ref": "#/entities/AiInstructionConfig" },
+      "description": "Admin-only AI behavioral instruction overrides."
+    },
+    "/aiSettings/{docId}": {
+      "schema": { "$ref": "#/entities/AiChatbotSetting" },
+      "description": "Chatbot public config at /aiSettings/chatbot (admin writes only)."
+    },
+    "/aiUsageDaily/{dateKey}": {
+      "schema": { "$ref": "#/entities/AiUsageDaily" },
+      "description": "Admin-only aggregate daily token/request usage counters (no transcripts)."
     }
   }
 }

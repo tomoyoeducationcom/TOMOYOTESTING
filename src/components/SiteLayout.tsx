@@ -16,6 +16,7 @@ import {
   GeometricMeshBackdrop,
   IndramayuHorizonCrest,
 } from './IndramayuMotifs';
+import { TomoyoAssistantWidget } from './TomoyoAssistantWidget';
 
 const TOP_NAV_LINKS = [
   { to: '/', label: 'Beranda' },
@@ -359,6 +360,8 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </footer>
+
+      <TomoyoAssistantWidget />
     </div>
   );
 }
