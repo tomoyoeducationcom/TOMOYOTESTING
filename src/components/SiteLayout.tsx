@@ -25,6 +25,7 @@ const TOP_NAV_LINKS = [
   { to: '/guru', label: 'Guru' },
   { to: '/cabang', label: 'Cabang' },
   { to: '/kontak', label: 'Kontak' },
+  { to: '/download-apk', label: 'Download APK' },
 ];
 
 const DRAWER_NAV_LINKS = [
@@ -40,6 +41,7 @@ const DRAWER_NAV_LINKS = [
   { to: '/cabang', label: 'Cabang & Lokasi' },
   { to: '/kontak', label: 'Kontak Resmi' },
   { to: '/daftar', label: 'Pendaftaran Siswa' },
+  { to: '/download-apk', label: 'Download APK Android' },
   { to: '/peta-situs', label: 'Peta Situs' },
 ];
 
@@ -97,7 +99,7 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
           {/* Zone 2: Clean single-line public text navigation links */}
           <nav
             aria-label="Navigasi utama"
-            className="hidden lg:flex items-center gap-6 text-sm font-medium text-[#3E4856]"
+            className="hidden lg:flex items-center gap-4 xl:gap-6 text-sm font-medium text-[#3E4856]"
           >
             {TOP_NAV_LINKS.map((item) => {
               const active =
@@ -306,6 +308,7 @@ export function SiteLayout({ children }: { children: React.ReactNode }) {
                 <li><Link to="/pengumuman" className="hover:text-white transition-colors">Pengumuman Resmi</Link></li>
                 <li><Link to="/cabang" className="hover:text-white transition-colors">Cabang &amp; Lokasi</Link></li>
                 <li><Link to="/daftar" className="hover:text-white transition-colors">Pendaftaran Siswa</Link></li>
+                <li><Link to="/download-apk" className="hover:text-white transition-colors">Download APK Android</Link></li>
                 <li><Link to="/masuk" className="hover:text-white transition-colors">Masuk Orang Tua</Link></li>
                 <li><Link to="/peta-situs" className="hover:text-white transition-colors">Peta Situs</Link></li>
               </ul>

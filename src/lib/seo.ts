@@ -1,3 +1,11 @@
+import {
+  TOMOYO_APK_BANNER_PNG,
+  TOMOYO_APK_DOWNLOAD_URL,
+  TOMOYO_APK_INSTALL_STEPS,
+  TOMOYO_APK_SEO,
+  buildDownloadApkStructuredData,
+} from './apkDownload';
+
 export interface RouteSeoMeta {
   path: string;
   title: string;
@@ -104,6 +112,13 @@ export const PUBLIC_INDEXABLE_ROUTES: RouteSeoMeta[] = [
     indexable: true,
   },
   {
+    path: TOMOYO_APK_SEO.path,
+    label: TOMOYO_APK_SEO.label,
+    title: TOMOYO_APK_SEO.title,
+    description: TOMOYO_APK_SEO.description,
+    indexable: true,
+  },
+  {
     path: '/peta-situs',
     label: 'Peta Situs',
     title: 'Peta Situs — TOMOYO PRIVAT & BIMBEL EDUCATION',
@@ -166,7 +181,7 @@ export function generateSitemapXml(baseUrl: string): string {
   const cleanBase = baseUrl.replace(/\/+$/, '');
   const urls = PUBLIC_INDEXABLE_ROUTES.map((route) => {
     const loc = route.path === '/' ? `${cleanBase}/` : `${cleanBase}${route.path}`;
-    const priority = route.path === '/' ? '1.0' : '0.8';
+    const priority = route.path === '/' ? '1.0' : route.path === TOMOYO_APK_SEO.path ? '0.9' : '0.8';
     return [
       '  <url>',
       `    <loc>${escapeXml(loc)}</loc>`,
@@ -216,10 +231,50 @@ function escapeXml(value: string): string {
     .replace(/'/g, '&apos;');
 }
 
+export function buildOrganizationJsonLd(baseUrl: string) {
+  const cleanBase = baseUrl.replace(/\/+$/, '');
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'EducationalOrganization',
+    name: 'TOMOYO PRIVAT & BIMBEL EDUCATION',
+    description:
+      'Tempat tumbuhnya generasi cerdas, mandiri, berprestasi, dan siap meraih masa depan.',
+    url: cleanBase,
+    email: 'tomoyoeducation.com@gmail.com',
+    telephone: '+6282119770700',
+    sameAs: [
+      'https://www.instagram.com/tomoyoeducation?bqrl=cHJsb3RnY3g1c3g2',
+      'https://www.facebook.com/share/1CSomr9gXK/',
+    ],
+  };
+}
+
+function buildDownloadApkSsrRootFallback(): string {
+  const stepsHtml = TOMOYO_APK_INSTALL_STEPS.map(
+    (s) =>
+      `<li><strong>${escapeHtmlAttr(s.stepNumber)}. ${escapeHtmlAttr(s.title)}</strong>: ${escapeHtmlAttr(s.description)}</li>`
+  ).join('');
+
+  return [
+    '<main style="max-width:960px;margin:0 auto;padding:32px 16px;font-family:sans-serif;color:#141a23;">',
+    '  <p>Aplikasi Resmi Android · TOMOYO PRIVAT &amp; BIMBEL EDUCATION</p>',
+    '  <h1>Download Aplikasi TOMOYO EDUCATION</h1>',
+    `  <p>${escapeHtmlAttr(TOMOYO_APK_SEO.description)}</p>`,
+    `  <p><a href="${escapeHtmlAttr(TOMOYO_APK_DOWNLOAD_URL)}" rel="noopener noreferrer">DOWNLOAD APK SEKARANG (APK Android Resmi)</a></p>`,
+    '  <h2>Panduan Instalasi APK Android</h2>',
+    `  <ol>${stepsHtml}</ol>`,
+    '</main>',
+  ].join('\n');
+}
+
 export function injectSeoIntoHtml(html: string, pathname: string, baseUrl: string): string {
   const meta = getSeoForPath(pathname);
   const cleanBase = baseUrl.replace(/\/+$/, '');
   const canonicalUrl = meta.path === '/' ? `${cleanBase}/` : `${cleanBase}${meta.path}`;
+  const isApkRoute = meta.path === TOMOYO_APK_SEO.path;
+  const ogImageUrl = isApkRoute
+    ? `${cleanBase}${TOMOYO_APK_BANNER_PNG}`
+    : `${cleanBase}/assets/aistudio/favicon_67ba3fe5.png`;
 
   let output = html
     .replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtmlAttr(meta.title)}</title>`)
@@ -240,11 +295,30 @@ export function injectSeoIntoHtml(html: string, pathname: string, baseUrl: strin
     ? '<meta name="robots" content="index, follow" />'
     : '<meta name="robots" content="noindex, nofollow" />';
 
-  const canonicalTag = meta.indexable
-    ? `<link rel="canonical" href="${escapeHtmlAttr(canonicalUrl)}" />\n    <meta property="og:url" content="${escapeHtmlAttr(canonicalUrl)}" />`
+  const canonicalAndSocialTags = meta.indexable
+    ? [
+        `<link rel="canonical" href="${escapeHtmlAttr(canonicalUrl)}" />`,
+        `<meta property="og:url" content="${escapeHtmlAttr(canonicalUrl)}" />`,
+        '<meta property="og:site_name" content="TOMOYO PRIVAT &amp; BIMBEL EDUCATION" />',
+        `<meta property="og:image" content="${escapeHtmlAttr(ogImageUrl)}" />`,
+        `<meta name="twitter:title" content="${escapeHtmlAttr(meta.title)}" />`,
+        `<meta name="twitter:description" content="${escapeHtmlAttr(meta.description)}" />`,
+        `<meta name="twitter:image" content="${escapeHtmlAttr(ogImageUrl)}" />`,
+      ].join('\n    ')
     : '';
 
-  const extraHead = [robotsTag, canonicalTag].filter(Boolean).join('\n    ');
+  const structuredData = meta.indexable
+    ? `<script id="tomoyo-org-jsonld" type="application/ld+json">${JSON.stringify(
+        isApkRoute ? buildDownloadApkStructuredData(cleanBase) : buildOrganizationJsonLd(cleanBase)
+      ).replace(/<\/script/gi, '<\\/script')}</script>`
+    : '';
+
+  const extraHead = [robotsTag, canonicalAndSocialTags, structuredData].filter(Boolean).join('\n    ');
   output = output.replace('<!--__SEO_HEAD__-->', extraHead);
+
+  if (isApkRoute) {
+    output = output.replace('<div id="root"></div>', `<div id="root">${buildDownloadApkSsrRootFallback()}</div>`);
+  }
+
   return output;
 }

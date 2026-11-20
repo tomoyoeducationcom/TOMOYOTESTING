@@ -1,6 +1,11 @@
 import { Link } from 'react-router-dom';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, Download, Smartphone } from 'lucide-react';
 import { BRAND_IDENTITY } from '../lib/domain';
+import {
+  TOMOYO_APK_BANNER_PNG,
+  TOMOYO_APK_BANNER_WEBP,
+  TOMOYO_APK_SEO,
+} from '../lib/apkDownload';
 import { useSiteData } from '../context/SiteDataContext';
 import { GoogleOfficialIcon } from '../components/BrandIcons';
 import {
@@ -143,6 +148,60 @@ export function HomePage() {
 
       {/* Cabang/Lokasi */}
       <BranchesSection branches={data.branches} />
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <BatikPaomanDivider />
+      </div>
+
+      {/* Internal Link & Banner Promo Aplikasi Android TOMOYO EDUCATION */}
+      <section className="py-12 sm:py-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="rounded-2xl bg-[#141A23] border border-[#242D3C] p-6 sm:p-8 lg:p-10 text-white space-y-6">
+            <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+              <div className="max-w-2xl space-y-2">
+                <p className="text-xs font-semibold tracking-[0.14em] uppercase text-[#FDE68A] inline-flex items-center gap-2">
+                  <Smartphone className="w-4 h-4 shrink-0" />
+                  <span>Aplikasi Resmi Android · TOMOYO EDUCATION</span>
+                </p>
+                <h2 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-white">
+                  Akses Layanan TOMOYO Lebih Praktis via Aplikasi Android
+                </h2>
+                <p className="text-sm sm:text-base text-slate-300 leading-relaxed">
+                  Unduh APK resmi TOMOYO EDUCATION untuk smartphone Android agar informasi program privat, bimbel, jadwal belajar, dan layanan orang tua selalu mudah diakses.
+                </p>
+              </div>
+              <Link
+                to="/download-apk"
+                className="inline-flex items-center justify-center gap-2 px-5 py-3 min-h-[46px] text-sm font-semibold text-white bg-[#A61B38] hover:bg-[#88132B] rounded-xl transition-colors whitespace-nowrap shrink-0"
+              >
+                <Download className="w-4 h-4 shrink-0" />
+                <span>Download APK TOMOYO</span>
+                <ArrowRight className="w-4 h-4 shrink-0" />
+              </Link>
+            </div>
+
+            <Link
+              to="/download-apk"
+              aria-label="Buka halaman Download APK TOMOYO EDUCATION untuk Android"
+              className="block rounded-xl border border-slate-800 bg-[#0F141C] p-3 sm:p-5 hover:border-[#FDE68A]/60 transition-colors"
+            >
+              <picture>
+                <source srcSet={TOMOYO_APK_BANNER_WEBP} type="image/webp" />
+                <img
+                  src={TOMOYO_APK_BANNER_PNG}
+                  alt={TOMOYO_APK_SEO.bannerAlt}
+                  width={3264}
+                  height={689}
+                  loading="lazy"
+                  decoding="async"
+                  className="w-full h-auto object-contain block"
+                  referrerPolicy="no-referrer"
+                />
+              </picture>
+            </Link>
+          </div>
+        </div>
+      </section>
 
       {/* Kontak dan Ajakan Mendaftar */}
       <ContactSection contact={data.contact} />

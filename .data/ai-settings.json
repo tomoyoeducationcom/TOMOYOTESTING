@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "botName": "TOMOYO ASISTEN",
+  "tagline": "Your Smart Education Assistant",
+  "description": "AI Assistant resmi TOMOYO EDUCATION.",
+  "welcomeMessage": "Halo! 👋 Selamat datang di TOMOYO EDUCATION.\nSaya TOMOYO ASISTEN, asisten virtual yang siap membantu kamu mendapatkan informasi tentang program belajar, kelas, pendaftaran, jadwal, dan informasi lainnya.\nAda yang ingin kamu tanyakan?",
+  "suggestedQuestions": [],
+  "adminWhatsapp": "+62 831-2190-2760",
+  "publicEnabled": true,
+  "adminEnabled": true,
+  "allowPublicStudentCount": true,
+  "maxRequestsPerSession": 20,
+  "maxInputLength": 600,
+  "maxOutputTokens": 1400,
+  "dailyRequestLimit": 500,
+  "monthlyRequestLimit": 10000,
+  "model": "openai/gpt-oss-20b",
+  "updatedAtIso": "2026-11-19T15:12:29.631Z"
+}

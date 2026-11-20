@@ -115,6 +115,21 @@ export function createApp() {
     res.type('application/xml').send(generateSitemapXml(baseUrl));
   });
 
+  app.get('/download-apk', (req, res, next) => {
+    if (!process.env.VERCEL && process.env.NODE_ENV !== 'production') {
+      next();
+      return;
+    }
+    const indexPath = path.resolve(process.cwd(), 'dist', 'index.html');
+    if (!fs.existsSync(indexPath)) {
+      next();
+      return;
+    }
+    const rawHtml = fs.readFileSync(indexPath, 'utf-8');
+    const seoHtml = injectSeoIntoHtml(rawHtml, '/download-apk', resolveBaseUrl(req));
+    res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8' }).end(seoHtml);
+  });
+
   app.get('/api/admin/verify', async (req, res) => {
     const { decoded, reason } = await verifyRequestFirebaseTokenDetailed(req);
     if (!decoded) {

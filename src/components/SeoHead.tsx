@@ -1,6 +1,11 @@
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { getSeoForPath } from '../lib/seo';
+import {
+  TOMOYO_APK_BANNER_PNG,
+  TOMOYO_APK_SEO,
+  buildDownloadApkStructuredData,
+} from '../lib/apkDownload';
+import { buildOrganizationJsonLd, getSeoForPath } from '../lib/seo';
 
 function upsertMeta(attrName: 'name' | 'property', attrValue: string, content: string) {
   let el = document.head.querySelector(`meta[${attrName}="${attrValue}"]`) as HTMLMetaElement | null;
@@ -19,13 +24,22 @@ export function SeoHead() {
     const meta = getSeoForPath(pathname);
     const origin = window.location.origin;
     const canonicalUrl = meta.path === '/' ? `${origin}/` : `${origin}${meta.path}`;
+    const isApkRoute = meta.path === TOMOYO_APK_SEO.path;
+    const ogImageUrl = isApkRoute
+      ? `${origin}${TOMOYO_APK_BANNER_PNG}`
+      : `${origin}/assets/aistudio/favicon_67ba3fe5.png`;
 
     document.title = meta.title;
     upsertMeta('name', 'description', meta.description);
+    upsertMeta('property', 'og:type', 'website');
+    upsertMeta('property', 'og:site_name', 'TOMOYO PRIVAT & BIMBEL EDUCATION');
     upsertMeta('property', 'og:title', meta.title);
     upsertMeta('property', 'og:description', meta.description);
+    upsertMeta('property', 'og:image', ogImageUrl);
+    upsertMeta('name', 'twitter:card', 'summary_large_image');
     upsertMeta('name', 'twitter:title', meta.title);
     upsertMeta('name', 'twitter:description', meta.description);
+    upsertMeta('name', 'twitter:image', ogImageUrl);
     upsertMeta(
       'name',
       'robots',
@@ -54,20 +68,9 @@ export function SeoHead() {
         script.type = 'application/ld+json';
         document.head.appendChild(script);
       }
-      script.textContent = JSON.stringify({
-        '@context': 'https://schema.org',
-        '@type': 'EducationalOrganization',
-        name: 'TOMOYO PRIVAT & BIMBEL EDUCATION',
-        description:
-          'Tempat tumbuhnya generasi cerdas, mandiri, berprestasi, dan siap meraih masa depan.',
-        url: origin,
-        email: 'tomoyoeducation.com@gmail.com',
-        telephone: '+6282119770700',
-        sameAs: [
-          'https://www.instagram.com/tomoyoeducation?bqrl=cHJsb3RnY3g1c3g2',
-          'https://www.facebook.com/share/1CSomr9gXK/',
-        ],
-      });
+      script.textContent = JSON.stringify(
+        isApkRoute ? buildDownloadApkStructuredData(origin) : buildOrganizationJsonLd(origin)
+      );
     } else if (script) {
       script.remove();
     }

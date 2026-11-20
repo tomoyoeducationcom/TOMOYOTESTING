@@ -22,6 +22,7 @@ import {
 import { LoginPage } from './pages/LoginPage';
 import { ParentDashboardPage } from './pages/ParentDashboardPage';
 import { AdminDashboardPage } from './pages/AdminDashboardPage';
+import { DownloadApkPage } from './pages/DownloadApkPage';
 import { QuizzesPage } from './pages/QuizzesPage';
 
 function NotFoundPage() {
@@ -108,6 +109,7 @@ export default function App() {
                       <Route path="/cabang" element={<BranchesPage />} />
                       <Route path="/kontak" element={<ContactPage />} />
                       <Route path="/daftar" element={<RegisterEntryPage />} />
+                      <Route path="/download-apk" element={<DownloadApkPage />} />
                       <Route path="/peta-situs" element={<SitemapHtmlPage />} />
                       <Route path="/masuk" element={<LoginPage />} />
                       <Route path="/dashboard" element={<ParentDashboardPage />} />

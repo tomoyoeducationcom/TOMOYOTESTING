@@ -962,6 +962,100 @@ var INITIAL_WA_TEMPLATES = [
   }
 ];
 
+// src/lib/apkDownload.ts
+var TOMOYO_APK_DOWNLOAD_URL = "https://drive.google.com/uc?export=download&id=1ARY-EUu8c1NGxo4zD-AhDnDSBDdJ3Rko";
+var TOMOYO_APK_BANNER_PNG = "/assets/aistudio/20261120_172643_6cf4e989.png";
+var TOMOYO_APK_SEO = {
+  path: "/download-apk",
+  label: "Download APK",
+  title: "Download APK TOMOYO EDUCATION \u2013 Aplikasi Resmi Android",
+  description: "Download aplikasi resmi TOMOYO EDUCATION untuk Android. Nikmati kemudahan mengakses layanan pendidikan, privat, dan bimbingan belajar TOMOYO melalui smartphone.",
+  bannerAlt: "Banner Download APK TOMOYO PARENT \u2014 Aplikasi Resmi Android TOMOYO PRIVAT & BIMBEL EDUCATION"
+};
+var TOMOYO_APK_INSTALL_STEPS = [
+  {
+    stepNumber: "01",
+    title: "Unduh File APK Resmi",
+    description: "Klik banner atau tombol Download APK di halaman ini, lalu klik DOWNLOAD APK SEKARANG untuk mengunduh file installer resmi melalui Google Drive TOMOYO EDUCATION."
+  },
+  {
+    stepNumber: "02",
+    title: "Buka File APK dari Pengelola Unduhan",
+    description: "Setelah unduhan selesai di smartphone Android Anda, buka panel notifikasi atau aplikasi File Manager pada folder Download dan ketuk file APK TOMOYO EDUCATION."
+  },
+  {
+    stepNumber: "03",
+    title: "Izinkan Pemasangan Aplikasi dari Browser atau File Manager",
+    description: 'Jika Android menampilkan permintaan izin "Instal aplikasi tidak dikenal" (Install unknown apps), aktifkan izin tersebut sementara agar proses pemasangan dapat berjalan.'
+  },
+  {
+    stepNumber: "04",
+    title: "Selesaikan Instalasi dan Buka Aplikasi",
+    description: "Ketuk tombol Instal, tunggu beberapa saat hingga selesai, lalu buka aplikasi TOMOYO EDUCATION untuk mengakses informasi program, jadwal, kuis, dan layanan privat & bimbel."
+  }
+];
+var TOMOYO_APK_SPEC_ITEMS = [
+  { label: "Nama Aplikasi", value: "TOMOYO EDUCATION" },
+  { label: "Sistem Operasi", value: "Android (APK Resmi)" },
+  { label: "Format File", value: "APK Android" },
+  { label: "Penerbit Resmi", value: BRAND_IDENTITY.officialName }
+];
+function buildDownloadApkStructuredData(baseUrl) {
+  const cleanBase = baseUrl.replace(/\/+$/, "");
+  const pageUrl = `${cleanBase}${TOMOYO_APK_SEO.path}`;
+  const bannerUrl = `${cleanBase}${TOMOYO_APK_BANNER_PNG}`;
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "EducationalOrganization",
+        "@id": `${cleanBase}/#organization`,
+        name: BRAND_IDENTITY.officialName,
+        alternateName: BRAND_IDENTITY.shortName,
+        description: BRAND_IDENTITY.meaning,
+        url: cleanBase,
+        email: "tomoyoeducation.com@gmail.com",
+        telephone: "+6282119770700",
+        sameAs: [
+          "https://www.instagram.com/tomoyoeducation?bqrl=cHJsb3RnY3g1c3g2",
+          "https://www.facebook.com/share/1CSomr9gXK/"
+        ]
+      },
+      {
+        "@type": "WebPage",
+        "@id": `${pageUrl}#webpage`,
+        url: pageUrl,
+        name: TOMOYO_APK_SEO.title,
+        description: TOMOYO_APK_SEO.description,
+        inLanguage: "id-ID",
+        isPartOf: {
+          "@id": `${cleanBase}/#organization`
+        },
+        primaryImageOfPage: {
+          "@type": "ImageObject",
+          url: bannerUrl
+        }
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": `${pageUrl}#software`,
+        name: "TOMOYO EDUCATION",
+        applicationCategory: "EducationalApplication",
+        operatingSystem: "Android",
+        downloadUrl: TOMOYO_APK_DOWNLOAD_URL,
+        url: pageUrl,
+        description: "Aplikasi resmi TOMOYO EDUCATION.",
+        image: bannerUrl,
+        publisher: {
+          "@type": "Organization",
+          name: BRAND_IDENTITY.officialName,
+          url: cleanBase
+        }
+      }
+    ]
+  };
+}
+
 // src/lib/seo.ts
 var PUBLIC_INDEXABLE_ROUTES = [
   {
@@ -1049,6 +1143,13 @@ var PUBLIC_INDEXABLE_ROUTES = [
     indexable: true
   },
   {
+    path: TOMOYO_APK_SEO.path,
+    label: TOMOYO_APK_SEO.label,
+    title: TOMOYO_APK_SEO.title,
+    description: TOMOYO_APK_SEO.description,
+    indexable: true
+  },
+  {
     path: "/peta-situs",
     label: "Peta Situs",
     title: "Peta Situs \u2014 TOMOYO PRIVAT & BIMBEL EDUCATION",
@@ -1103,7 +1204,7 @@ function generateSitemapXml(baseUrl) {
   const cleanBase = baseUrl.replace(/\/+$/, "");
   const urls = PUBLIC_INDEXABLE_ROUTES.map((route) => {
     const loc = route.path === "/" ? `${cleanBase}/` : `${cleanBase}${route.path}`;
-    const priority = route.path === "/" ? "1.0" : "0.8";
+    const priority = route.path === "/" ? "1.0" : route.path === TOMOYO_APK_SEO.path ? "0.9" : "0.8";
     return [
       "  <url>",
       `    <loc>${escapeXml(loc)}</loc>`,
@@ -1139,10 +1240,43 @@ function escapeHtmlAttr(value) {
 function escapeXml(value) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 }
+function buildOrganizationJsonLd(baseUrl) {
+  const cleanBase = baseUrl.replace(/\/+$/, "");
+  return {
+    "@context": "https://schema.org",
+    "@type": "EducationalOrganization",
+    name: "TOMOYO PRIVAT & BIMBEL EDUCATION",
+    description: "Tempat tumbuhnya generasi cerdas, mandiri, berprestasi, dan siap meraih masa depan.",
+    url: cleanBase,
+    email: "tomoyoeducation.com@gmail.com",
+    telephone: "+6282119770700",
+    sameAs: [
+      "https://www.instagram.com/tomoyoeducation?bqrl=cHJsb3RnY3g1c3g2",
+      "https://www.facebook.com/share/1CSomr9gXK/"
+    ]
+  };
+}
+function buildDownloadApkSsrRootFallback() {
+  const stepsHtml = TOMOYO_APK_INSTALL_STEPS.map(
+    (s) => `<li><strong>${escapeHtmlAttr(s.stepNumber)}. ${escapeHtmlAttr(s.title)}</strong>: ${escapeHtmlAttr(s.description)}</li>`
+  ).join("");
+  return [
+    '<main style="max-width:960px;margin:0 auto;padding:32px 16px;font-family:sans-serif;color:#141a23;">',
+    "  <p>Aplikasi Resmi Android \xB7 TOMOYO PRIVAT &amp; BIMBEL EDUCATION</p>",
+    "  <h1>Download Aplikasi TOMOYO EDUCATION</h1>",
+    `  <p>${escapeHtmlAttr(TOMOYO_APK_SEO.description)}</p>`,
+    `  <p><a href="${escapeHtmlAttr(TOMOYO_APK_DOWNLOAD_URL)}" rel="noopener noreferrer">DOWNLOAD APK SEKARANG (APK Android Resmi)</a></p>`,
+    "  <h2>Panduan Instalasi APK Android</h2>",
+    `  <ol>${stepsHtml}</ol>`,
+    "</main>"
+  ].join("\n");
+}
 function injectSeoIntoHtml(html, pathname, baseUrl) {
   const meta = getSeoForPath(pathname);
   const cleanBase = baseUrl.replace(/\/+$/, "");
   const canonicalUrl = meta.path === "/" ? `${cleanBase}/` : `${cleanBase}${meta.path}`;
+  const isApkRoute = meta.path === TOMOYO_APK_SEO.path;
+  const ogImageUrl = isApkRoute ? `${cleanBase}${TOMOYO_APK_BANNER_PNG}` : `${cleanBase}/assets/aistudio/favicon_67ba3fe5.png`;
   let output = html.replace(/<title>[\s\S]*?<\/title>/i, `<title>${escapeHtmlAttr(meta.title)}</title>`).replace(
     /<meta\s+name="description"\s+content="[^"]*"\s*\/?>/i,
     `<meta name="description" content="${escapeHtmlAttr(meta.description)}" />`
@@ -1154,10 +1288,23 @@ function injectSeoIntoHtml(html, pathname, baseUrl) {
     `<meta property="og:description" content="${escapeHtmlAttr(meta.description)}" />`
   );
   const robotsTag = meta.indexable ? '<meta name="robots" content="index, follow" />' : '<meta name="robots" content="noindex, nofollow" />';
-  const canonicalTag = meta.indexable ? `<link rel="canonical" href="${escapeHtmlAttr(canonicalUrl)}" />
-    <meta property="og:url" content="${escapeHtmlAttr(canonicalUrl)}" />` : "";
-  const extraHead = [robotsTag, canonicalTag].filter(Boolean).join("\n    ");
+  const canonicalAndSocialTags = meta.indexable ? [
+    `<link rel="canonical" href="${escapeHtmlAttr(canonicalUrl)}" />`,
+    `<meta property="og:url" content="${escapeHtmlAttr(canonicalUrl)}" />`,
+    '<meta property="og:site_name" content="TOMOYO PRIVAT &amp; BIMBEL EDUCATION" />',
+    `<meta property="og:image" content="${escapeHtmlAttr(ogImageUrl)}" />`,
+    `<meta name="twitter:title" content="${escapeHtmlAttr(meta.title)}" />`,
+    `<meta name="twitter:description" content="${escapeHtmlAttr(meta.description)}" />`,
+    `<meta name="twitter:image" content="${escapeHtmlAttr(ogImageUrl)}" />`
+  ].join("\n    ") : "";
+  const structuredData = meta.indexable ? `<script id="tomoyo-org-jsonld" type="application/ld+json">${JSON.stringify(
+    isApkRoute ? buildDownloadApkStructuredData(cleanBase) : buildOrganizationJsonLd(cleanBase)
+  ).replace(/<\/script/gi, "<\\/script")}</script>` : "";
+  const extraHead = [robotsTag, canonicalAndSocialTags, structuredData].filter(Boolean).join("\n    ");
   output = output.replace("<!--__SEO_HEAD__-->", extraHead);
+  if (isApkRoute) {
+    output = output.replace('<div id="root"></div>', `<div id="root">${buildDownloadApkSsrRootFallback()}</div>`);
+  }
   return output;
 }
 
@@ -4758,6 +4905,20 @@ function createApp() {
   app2.get("/sitemap.xml", (req, res) => {
     const baseUrl = resolveBaseUrl(req);
     res.type("application/xml").send(generateSitemapXml(baseUrl));
+  });
+  app2.get("/download-apk", (req, res, next) => {
+    if (!process.env.VERCEL && process.env.NODE_ENV !== "production") {
+      next();
+      return;
+    }
+    const indexPath = path2.resolve(process.cwd(), "dist", "index.html");
+    if (!fs2.existsSync(indexPath)) {
+      next();
+      return;
+    }
+    const rawHtml = fs2.readFileSync(indexPath, "utf-8");
+    const seoHtml = injectSeoIntoHtml(rawHtml, "/download-apk", resolveBaseUrl(req));
+    res.status(200).set({ "Content-Type": "text/html; charset=utf-8" }).end(seoHtml);
   });
   app2.get("/api/admin/verify", async (req, res) => {
     const { decoded, reason } = await verifyRequestFirebaseTokenDetailed(req);
