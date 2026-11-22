@@ -210,7 +210,7 @@ export function DownloadApkPage() {
                 className="inline-flex items-center justify-center gap-2.5 w-full px-5 py-3 min-h-[46px] text-sm font-semibold text-white bg-[#141A23] hover:bg-[#A61B38] rounded-xl transition-colors cursor-pointer"
               >
                 <FileCheck2 className="w-4 h-4 shrink-0" />
-                <span>Buka Pop-Up Download APK</span>
+                <span>DONWLOAD APLIKASI</span>
               </button>
             </aside>
           </div>
