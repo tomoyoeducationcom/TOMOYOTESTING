@@ -31,7 +31,7 @@ export function DownloadApkPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const { data } = useSiteData();
   const waUrl = data.contact.whatsappUrl || 'https://wa.me/6282119770700';
-  const waDisplay = data.contact.whatsappDisplay || '0821-1977-0700';
+  const waDisplay = data.contact.whatsappDisplay || '082119770700';
 
   return (
     <div>
