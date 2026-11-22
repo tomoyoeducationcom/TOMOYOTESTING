@@ -21,19 +21,20 @@ import {
   TeachersSection,
 } from '../components/PublicSections';
 
-const HERO_INDRAMAYU_ALUN_ALUN = '/assets/aistudio/WhatsApp_Image_2026-11-19_at_11.24.52_af9d5f53.jpeg';
+const HERO_LEARNING_SESSION =
+  '/assets/aistudio/WhatsApp_Image_2026-11-19_at_11.24.52_af9d5f53.jpeg_a5cb9e21.jpeg';
 
 export function HomePage() {
   const { data } = useSiteData();
 
   return (
     <div>
-      {/* Editorial Full-Bleed Hero over Aerial Alun-Alun Indramayu Photography */}
+      {/* Editorial Full-Bleed Hero over Tutor & Students Learning Session Photography */}
       <section className="relative overflow-hidden bg-[#141A23] text-white min-h-[540px] sm:min-h-[600px] lg:min-h-[640px] flex flex-col justify-between">
         <img
-          src={HERO_INDRAMAYU_ALUN_ALUN}
-          alt="Pemandangan udara Alun-Alun Indramayu dan Gunung Ciremai di kejauhan"
-          className="absolute inset-0 w-full h-full object-cover object-center"
+          src={HERO_LEARNING_SESSION}
+          alt="Pendampingan belajar privat dan bimbingan belajar siswa bersama pengajar TOMOYO Education"
+          className="absolute inset-0 w-full h-full object-cover object-[58%_22%]"
           referrerPolicy="no-referrer"
         />
         <div className="hero-scrim absolute inset-0" aria-hidden="true" />
